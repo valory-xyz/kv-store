@@ -2886,6 +2886,16 @@ files = [
 ]
 
 [[package]]
+name = "peewee"
+version = "3.17.5"
+description = "a little orm"
+optional = false
+python-versions = "*"
+files = [
+    {file = "peewee-3.17.5.tar.gz", hash = "sha256:e1b6a64192207fd3ddb4e1188054820f42aef0aadfa749e3981af3c119a76420"},
+]
+
+[[package]]
 name = "pefile"
 version = "2024.8.26"
 description = "Python PE parsing module"
@@ -4689,4 +4699,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.0"
 python-versions = "<3.12,>=3.10"
-content-hash = "2dd3756946a61e1fc3503f996adaa1bb33be72852f53567c7b323d015d7bb4e1"
+content-hash = "7319874dd97c1a6744ef5a1bd5d3710a892928224a5fed3f13e33ed6753d1fab"
