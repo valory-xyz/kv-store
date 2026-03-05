@@ -8,12 +8,12 @@ license: Apache-2.0
 aea_version: '>=2.0.0, <3.0.0'
 fingerprint:
   README.md: bafybeiaclv6zlc72yjdmif35eag3skp5orymdazqzutxfo3pxtovsr4jqy
-  __init__.py: bafybeiep5deijcglaywkm3y6spa7xtajklluh7mrvoyfj673vujg3mxbiq
+  __init__.py: bafybeiaqol6x73thfs3cag3xjprvp66e4bdsm3by6xwqb7tf243p2pktoe
   dialogues.py: bafybeidcnrhbe6flwxqk7edawnj37ry7eeibombqau6oqt2lh6qzfk7gyq
   kv_store.proto: bafybeiep2xzwwisio7woispucdp63qvjsi6oaprjfbnketyt5gh2xmw7vi
-  kv_store_pb2.py: bafybeia5use7njuxfm6ezjs32soiaz2tzpnkygitpz6pd5zx565ykpvtua
-  message.py: bafybeibkwwkim4xgupy2xcdag62o6rx45xobkai543fzkmqkbhsi2ifyay
-  serialization.py: bafybeia7slr3lgfdb34oooiu4ctkgig7cmq66wolbpop2a55c3dy7izo4a
+  kv_store_pb2.py: bafybeihugunosc3ko4hj3hqyg6767yxfuxxjzjsdukeerxb2636bxog6ee
+  message.py: bafybeidawbq4xbduinmnllqv4bhnfgkll77iexycx43h6wruq5wni7jgey
+  serialization.py: bafybeicljvo4yhldjo2fzyed45u4suw6fymw4hxvi3bvsrbqqnctowy2da
 fingerprint_ignore_patterns: []
 dependencies:
   protobuf: {}

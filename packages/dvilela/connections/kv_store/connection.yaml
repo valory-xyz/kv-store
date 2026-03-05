@@ -7,12 +7,12 @@ license: Apache-2.0
 aea_version: '>=2.0.0, <3.0.0'
 fingerprint:
   __init__.py: bafybeig2uzkwmyfyqip5uhswjbxm3r5qlunn4m32kmgi24w3imiotecrmi
-  connection.py: bafybeigeulkt3wny7cwukwmxvjd3ak7bfyeov6fug2zsjewueeou5pypzy
+  connection.py: bafybeif6c4nmmpzywnn4oe7mwfwpltbdplooiw5thaippw5bdf3ib55zli
   readme.md: bafybeigyb5o5tymr2cl6mgdf2mcb74v66iuc4m4rwvxox5wtydsqxy7dmm
 fingerprint_ignore_patterns: []
 connections: []
 protocols:
-- dvilela/kv_store:0.1.0:bafybeianryj5powscuj6eupseja7xjzo5ecsd6sr7ketfw667nvxkvi7fa
+- dvilela/kv_store:0.1.0:bafybeib3hyj6om7bdsqqhsc4ro3xdxijp2mk5da7ks4ipfgxiovtc3aqfm
 class_name: KvStoreConnection
 config:
   store_path: null
