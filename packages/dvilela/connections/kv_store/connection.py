@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """Key-value connection and channel."""
+
 from pathlib import Path
 from typing import Any, Callable, cast
 
@@ -17,7 +18,6 @@ from packages.dvilela.protocols.kv_store.dialogues import (
     KvStoreDialogues as BaseKvStoreDialogues,
 )
 from packages.dvilela.protocols.kv_store.message import KvStoreMessage
-
 
 PUBLIC_ID = PublicId.from_str("dvilela/kv_store:0.1.0")
 
@@ -207,7 +207,7 @@ class KvStoreConnection(BaseSyncConnection):
                     message="OK",
                 ),
             )
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             return cast(
                 KvStoreMessage,
                 dialogue.reply(

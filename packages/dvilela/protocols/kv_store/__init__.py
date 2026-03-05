@@ -26,5 +26,4 @@ It was created with protocol buffer compiler version `libprotoc 26.0` and aea pr
 from packages.dvilela.protocols.kv_store.message import KvStoreMessage
 from packages.dvilela.protocols.kv_store.serialization import KvStoreSerializer
 
-
 KvStoreMessage.serializer = KvStoreSerializer
