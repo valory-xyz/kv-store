@@ -71,16 +71,16 @@ security:
 
 .PHONY: common-checks-1
 common-checks-1:
-	tox -e copyright-check
+	tox -qq -e copyright-check
 	tomte check-doc-links
-	tox -p -e check-hash -e check-packages -e check-doc-hashes -e analyse-service
+	tox -qq -p -e check-hash -e check-packages -e check-doc-hashes -e analyse-service
 
 .PHONY: common-checks-2
 common-checks-2:
-	tox -e check-abci-docstrings
-	tox -e check-abciapp-specs
-	tox -e check-dependencies
-	tox -e check-handlers
+	tox -qq -e check-abci-docstrings
+	tox -qq -e check-abciapp-specs
+	tox -qq -e check-dependencies
+	tox -qq -e check-handlers
 
 .PHONY: all-checks
 all-checks: format code-checks security generators common-checks-1 common-checks-2
@@ -93,18 +93,18 @@ protolint_install:
 .PHONY: ci-linter-checks
 ci-linter-checks:
 	gitleaks detect --report-format json --report-path leak_report --log-opts="HEAD"
-# 	tox -e copyright-check
-	tox -e liccheck
-	tox -e check-dependencies
+	tox -qq -e copyright-check
+	tox -qq -e liccheck
+	tox -qq -e check-dependencies
 	tomte check-doc-links
-	tox -e check-doc-hashes
+	tox -qq -e check-doc-hashes
 	tomte check-security
-	tox -e check-packages
-	tox -e check-hash
+	tox -qq -e check-packages
+	tox -qq -e check-hash
 	tomte check-code
 	tomte check-spelling
-	tox -e check-abciapp-specs
-	tox -e check-handlers
+	tox -qq -e check-abciapp-specs
+	tox -qq -e check-handlers
 
 
 .PHONY: push-packages
@@ -114,6 +114,6 @@ push-packages:
 
 .PHONY: generators
 generators:
-	tox -e abci-docstrings
+	tox -qq -e abci-docstrings
 	tomte format-copyright --author author_name
 	autonomy packages lock
