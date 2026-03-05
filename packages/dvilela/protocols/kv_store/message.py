@@ -27,7 +27,6 @@ from aea.configurations.base import PublicId
 from aea.exceptions import AEAEnforceError, enforce
 from aea.protocols.base import Message  # type: ignore
 
-
 _default_logger = logging.getLogger("aea.packages.dvilela.protocols.kv_store.message")
 
 DEFAULT_BODY_SIZE = 4

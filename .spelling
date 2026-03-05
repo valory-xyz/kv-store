@@ -1,0 +1,20 @@
+# markdown-spellcheck spelling configuration file
+# Format - lines beginning # are comments
+# global dictionary is at the start, file overrides afterwards
+# one word per line, to define a file override use ' - filename'
+# where filename is relative to this configuration file
+AbciApp
+abci
+abci-docstrings
+common-checks-1
+common-checks-2
+db
+docstring
+docstrings
+Docstrings
+kv-store
+peewee
+sqlite
+linter
+linters
+Linters

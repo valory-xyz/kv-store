@@ -3,11 +3,11 @@
 # source: kv_store.proto
 # Protobuf Python Version: 5.26.0
 """Generated protocol buffer code."""
+
 from google.protobuf import descriptor as _descriptor  # type: ignore
 from google.protobuf import descriptor_pool as _descriptor_pool
 from google.protobuf import symbol_database as _symbol_database
 from google.protobuf.internal import builder as _builder  # type: ignore
-
 
 # @@protoc_insertion_point(imports)
 
@@ -23,9 +23,9 @@ _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, "kv_store_pb2", _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
     DESCRIPTOR._loaded_options = None
-    _globals[
-        "_KVSTOREMESSAGE_READ_RESPONSE_PERFORMATIVE_DATAENTRY"
-    ]._loaded_options = None
+    _globals["_KVSTOREMESSAGE_READ_RESPONSE_PERFORMATIVE_DATAENTRY"]._loaded_options = (
+        None
+    )
     _globals[
         "_KVSTOREMESSAGE_READ_RESPONSE_PERFORMATIVE_DATAENTRY"
     ]._serialized_options = b"8\001"
@@ -44,9 +44,9 @@ if not _descriptor._USE_C_DESCRIPTORS:
     _globals[
         "_KVSTOREMESSAGE_READ_RESPONSE_PERFORMATIVE_DATAENTRY"
     ]._serialized_start = 713
-    _globals[
-        "_KVSTOREMESSAGE_READ_RESPONSE_PERFORMATIVE_DATAENTRY"
-    ]._serialized_end = 756
+    _globals["_KVSTOREMESSAGE_READ_RESPONSE_PERFORMATIVE_DATAENTRY"]._serialized_end = (
+        756
+    )
     _globals[
         "_KVSTOREMESSAGE_CREATE_OR_UPDATE_REQUEST_PERFORMATIVE"
     ]._serialized_start = 759
