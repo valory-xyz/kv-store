@@ -3,8 +3,19 @@
 # global dictionary is at the start, file overrides afterwards
 # one word per line, to define a file override use ' - filename'
 # where filename is relative to this configuration file
+AEA
 AbciApp
 abci
+autonomy
+CONTRIBUTING
+envs
+KV
+meme-ooorr
+peewee-orm
+repo
+tox
+tsunami
+uv
 abci-docstrings
 common-checks-1
 common-checks-2
