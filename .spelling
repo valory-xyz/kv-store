@@ -4,27 +4,18 @@
 # one word per line, to define a file override use ' - filename'
 # where filename is relative to this configuration file
 AEA
-Autonolas
 AbciApp
 abci
-async
 autonomy
 CONTRIBUTING
 envs
 KV
-LICENSE
 meme-ooorr
 peewee-orm
-json
-PR
-pre-PR
-pydantic
 repo
 tox
 tsunami
 uv
-upstreamed
-w3multicall
 abci-docstrings
 common-checks-1
 common-checks-2

@@ -26,7 +26,7 @@ autonomy packages sync
 
 ## Development
 
-Common workflows are wired through `make`; see `make help` or the individual `tox` envs in `tox.ini`.
+Common workflows are wired through `make`; see the `Makefile` or the individual `tox` envs in `tox.ini`.
 
 ```bash
 make format          # black + isort

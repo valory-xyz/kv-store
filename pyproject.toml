@@ -54,7 +54,7 @@ Repository = "https://github.com/valory-xyz/kv-store"
 
 [dependency-groups]
 dev = [
-    "tomte[cli, tests]>=0.6.5",
+    "tomte[cli, tests]==0.6.5",
 ]
 
 [tool.uv]
