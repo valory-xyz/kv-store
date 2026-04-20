@@ -1805,6 +1805,7 @@ dependencies = [
     { name = "hypothesis" },
     { name = "jsonschema" },
     { name = "multiaddr" },
+    { name = "open-aea-cli-ipfs" },
     { name = "open-aea-helpers" },
     { name = "open-aea-ledger-cosmos" },
     { name = "open-aea-ledger-ethereum" },
@@ -1850,6 +1851,7 @@ requires-dist = [
     { name = "hypothesis", specifier = "==6.21.6" },
     { name = "jsonschema", specifier = ">=4.23.0,<5.0.0" },
     { name = "multiaddr", specifier = "==0.0.9" },
+    { name = "open-aea-cli-ipfs", specifier = "==2.2.1" },
     { name = "open-aea-helpers", specifier = "==0.21.18" },
     { name = "open-aea-ledger-cosmos", specifier = "==2.2.1" },
     { name = "open-aea-ledger-ethereum", specifier = "==2.2.1" },
@@ -2220,6 +2222,19 @@ all = [
     { name = "packaging" },
     { name = "pytest" },
     { name = "pyyaml" },
+]
+
+[[package]]
+name = "open-aea-cli-ipfs"
+version = "2.2.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "click" },
+    { name = "open-aea" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/5a/34/b1137359e9aba3f6706f5dea3322c7eb13ab24c7333d1faf61a84d012a00/open_aea_cli_ipfs-2.2.1.tar.gz", hash = "sha256:3bfa4da06c5ddb0d1622be624c6fa60a00b1e691ca8ed5a0f602581883c20f13", size = 29077, upload-time = "2026-04-15T17:40:25.48Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/90/97/a150b611794c5a8f6d9f2f86cc4fd2ad29c2f9abb23c5170f3cfbecc3c3b/open_aea_cli_ipfs-2.2.1-py3-none-any.whl", hash = "sha256:e81dba96c6661c073ae634e91a2f588d710b58879c3b398f6914d0cf73de9ed1", size = 23903, upload-time = "2026-04-15T17:40:24.533Z" },
 ]
 
 [[package]]

@@ -3,6 +3,6 @@
 kv-store provides a wrapper around the a sqlite db using peewee.
 
 
-### Originally implementated in  
+### Originally implemented in
 - [connection](https://github.com/valory-xyz/meme-ooorr)
 - [protocol](https://github.com/dvilelaf/tsunami)
