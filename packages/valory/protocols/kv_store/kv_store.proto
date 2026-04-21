@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package aea.dvilela.kv_store.v0_1_0;
+package aea.valory.kv_store.v0_1_0;
 
 message KvStoreMessage{
 

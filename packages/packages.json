@@ -1,7 +1,7 @@
 {
     "dev": {
-        "protocol/dvilela/kv_store/0.1.0": "bafybeifkwdlyhp2z3ts7yvuvgqsvmuufmx63bjvp4bj6ujg5gzncjni2ay",
-        "connection/dvilela/kv_store/0.1.0": "bafybeihw7ykqq3m3mi4kti6sy3x5btfpw22tdpnhrpty2b7qwwocmma53y"
+        "protocol/valory/kv_store/0.1.0": "bafybeia5olmoljxmwymwdlw6egrjcsbm3r2olayycz3dpbg57bqtij75mq",
+        "connection/valory/kv_store/0.1.0": "bafybeigtbb7qch5et2wked5h7riozxfw2rui3yp47lfdkhin7zcmpsosbi"
     },
     "third_party": {}
 }

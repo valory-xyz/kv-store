@@ -1,5 +1,22 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# ------------------------------------------------------------------------------
+#
+#   Copyright 2024-2026 Valory AG
+#
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
+#
+# ------------------------------------------------------------------------------
 
 """Key-value connection and channel."""
 
@@ -13,13 +30,13 @@ from aea.protocols.base import Address, Message
 from aea.protocols.dialogue.base import Dialogue
 from peewee import CharField, Model, SqliteDatabase  # type: ignore
 
-from packages.dvilela.protocols.kv_store.dialogues import KvStoreDialogue
-from packages.dvilela.protocols.kv_store.dialogues import (
+from packages.valory.protocols.kv_store.dialogues import KvStoreDialogue
+from packages.valory.protocols.kv_store.dialogues import (
     KvStoreDialogues as BaseKvStoreDialogues,
 )
-from packages.dvilela.protocols.kv_store.message import KvStoreMessage
+from packages.valory.protocols.kv_store.message import KvStoreMessage
 
-PUBLIC_ID = PublicId.from_str("dvilela/kv_store:0.1.0")
+PUBLIC_ID = PublicId.from_str("valory/kv_store:0.1.0")
 
 
 db = SqliteDatabase(None)

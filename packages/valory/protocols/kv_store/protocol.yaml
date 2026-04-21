@@ -1,0 +1,19 @@
+name: kv_store
+author: valory
+version: 0.1.0
+protocol_specification_id: valory/kv_store:0.1.0
+type: protocol
+description: A protocol for simple key-value storage communications.
+license: Apache-2.0
+aea_version: '>=2.0.0, <3.0.0'
+fingerprint:
+  README.md: bafybeig6sojpr3klidvjhcyxzqdrrslz3ube7xgydlgebnhkyogeprx7ue
+  __init__.py: bafybeiawbmkq67kmjckyhxow5yklqu6ekdhalapxyuhq3nobwqmlkk2yfm
+  dialogues.py: bafybeif6bf44ap5hgstgsf3qojsijket746hlulgo3cavbbnvqfirohvqq
+  kv_store.proto: bafybeievnmcsa2kp5s7r4xyb2metwgwthvjacs63642ri5iuuumebkqyha
+  kv_store_pb2.py: bafybeidwmnhyv7rdbs4ps2prcburp5uxd2bnssk5slsgdd7o3d2xyjqewy
+  message.py: bafybeig7gmp4eds6wfeov5zcodleaaw7ovhx35wifo3ztdhhlk3bgj4yxi
+  serialization.py: bafybeibn4slp776fxbtnurdge2xd2boz4lr34mnhtqew7xsuztrh3q4gsm
+fingerprint_ignore_patterns: []
+dependencies:
+  protobuf: {}
