@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # ------------------------------------------------------------------------------
 #
-#   Copyright 2024 David Vilela Freire
+#   Copyright 2024-2026 Valory AG
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -20,15 +20,15 @@
 """Serialization module for kv_store protocol."""
 
 # pylint: disable=too-many-statements,too-many-locals,no-member,too-few-public-methods,redefined-builtin,no-name-in-module
-from typing import Any, Dict, cast  # noqa: F401
+from typing import Any, Dict, cast
 
 from aea.mail.base_pb2 import DialogueMessage  # type: ignore
 from aea.mail.base_pb2 import Message as ProtobufMessage  # type: ignore
 from aea.protocols.base import Message  # type: ignore
 from aea.protocols.base import Serializer  # type: ignore
 
-from packages.dvilela.protocols.kv_store import kv_store_pb2  # type: ignore
-from packages.dvilela.protocols.kv_store.message import KvStoreMessage  # type: ignore
+from packages.valory.protocols.kv_store import kv_store_pb2  # type: ignore
+from packages.valory.protocols.kv_store.message import KvStoreMessage  # type: ignore
 
 
 class KvStoreSerializer(Serializer):
@@ -109,7 +109,7 @@ class KvStoreSerializer(Serializer):
         kv_store_pb.ParseFromString(message_pb.dialogue_message.content)
         performative = kv_store_pb.WhichOneof("performative")
         performative_id = KvStoreMessage.Performative(str(performative))
-        performative_content = dict()  # type: Dict[str, Any]
+        performative_content: Dict[str, Any] = dict()
         if performative_id == KvStoreMessage.Performative.READ_REQUEST:
             keys = kv_store_pb.read_request.keys
             keys_tuple = tuple(keys)
@@ -136,5 +136,5 @@ class KvStoreSerializer(Serializer):
             dialogue_reference=dialogue_reference,
             target=target,
             performative=performative,
-            **performative_content,
+            **performative_content
         )

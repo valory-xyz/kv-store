@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # ------------------------------------------------------------------------------
 #
-#   Copyright 2024 David Vilela Freire
+#   Copyright 2024-2026 Valory AG
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@ from aea.configurations.base import PublicId
 from aea.exceptions import AEAEnforceError, enforce
 from aea.protocols.base import Message  # type: ignore
 
-_default_logger = logging.getLogger("aea.packages.dvilela.protocols.kv_store.message")
+_default_logger = logging.getLogger("aea.packages.valory.protocols.kv_store.message")
 
 DEFAULT_BODY_SIZE = 4
 
@@ -35,8 +35,8 @@ DEFAULT_BODY_SIZE = 4
 class KvStoreMessage(Message):
     """A protocol for simple key-value storage."""
 
-    protocol_id = PublicId.from_str("dvilela/kv_store:0.1.0")
-    protocol_specification_id = PublicId.from_str("dvilela/kv_store:0.1.0")
+    protocol_id = PublicId.from_str("valory/kv_store:0.1.0")
+    protocol_specification_id = PublicId.from_str("valory/kv_store:0.1.0")
 
     class Performative(Message.Performative):
         """Performatives for the kv_store protocol."""

@@ -6,10 +6,10 @@ Key-value storage components for [Open Autonomy](https://github.com/valory-xyz/o
 
 | Package | Public ID | Description |
 |---|---|---|
-| Connection | `dvilela/kv_store` | SQLite-backed KV store, wired through the AEA connection interface |
-| Protocol | `dvilela/kv_store` | Message schema for `get` / `set` / `remove` operations against the store |
+| Connection | `valory/kv_store` | SQLite-backed KV store, wired through the AEA connection interface |
+| Protocol | `valory/kv_store` | Message schema for `get` / `set` / `remove` operations against the store |
 
-Both packages live under `packages/dvilela/`. They were originally implemented across [meme-ooorr](https://github.com/valory-xyz/meme-ooorr) (connection) and [tsunami](https://github.com/dvilelaf/tsunami) (protocol) and extracted here for reuse.
+Both packages live under `packages/valory/`. They were originally implemented across [meme-ooorr](https://github.com/valory-xyz/meme-ooorr) (connection) and [tsunami](https://github.com/dvilelaf/tsunami) (protocol) and extracted here for reuse.
 
 ## Requirements
 
