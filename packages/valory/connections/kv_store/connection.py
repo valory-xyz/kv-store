@@ -30,7 +30,9 @@ from aea.protocols.base import Address, Message
 from aea.protocols.dialogue.base import Dialogue
 from peewee import CharField, Model, SqliteDatabase  # type: ignore
 
-from packages.valory.protocols.kv_store.dialogues import KvStoreDialogue
+from packages.valory.protocols.kv_store.dialogues import (
+    KvStoreDialogue,
+)
 from packages.valory.protocols.kv_store.dialogues import (
     KvStoreDialogues as BaseKvStoreDialogues,
 )
