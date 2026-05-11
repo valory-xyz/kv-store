@@ -23,7 +23,7 @@ import itertools
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Dict, Generator, Tuple
+from typing import Any, Dict, Generator, Optional, Tuple, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -32,9 +32,11 @@ from aea.mail.base import Envelope
 from packages.valory.connections.kv_store import connection as conn_mod
 from packages.valory.connections.kv_store.connection import (
     KvStoreConnection,
+    KvStoreDialogue,
     KvStoreDialogues,
     PUBLIC_ID,
     Store,
+    _GENERIC_ERROR_MESSAGE,
 )
 from packages.valory.protocols.kv_store.message import KvStoreMessage
 
@@ -60,6 +62,14 @@ def _make_connection() -> KvStoreConnection:
     return instance
 
 
+def _teardown_db() -> None:
+    """Drop tables, close, and unbind the module-level peewee DB."""
+    if not conn_mod.db.is_closed():
+        conn_mod.db.drop_tables([Store])
+        conn_mod.db.close()
+    conn_mod.db.init(None)
+
+
 @pytest.fixture()
 def fresh_db() -> Generator[None, None, None]:
     """Bind the module-level peewee DB to a fresh in-memory SQLite per test."""
@@ -69,14 +79,30 @@ def fresh_db() -> Generator[None, None, None]:
     try:
         yield
     finally:
-        if not conn_mod.db.is_closed():
-            conn_mod.db.drop_tables([Store])
-            conn_mod.db.close()
+        _teardown_db()
+
+
+@pytest.fixture()
+def disk_db(tmp_path: Any) -> Generator[None, None, None]:
+    """Bind the module-level peewee DB to a file-backed SQLite per test."""
+    conn_mod.db.init(str(tmp_path / "store.db"))
+    conn_mod.db.connect(reuse_if_open=True)
+    conn_mod.db.create_tables([Store])
+    try:
+        yield
+    finally:
+        _teardown_db()
 
 
 @pytest.fixture()
 def kv_connection(fresh_db: None) -> KvStoreConnection:  # noqa: ARG001
     """A KvStoreConnection wired to a fresh in-memory DB."""
+    return _make_connection()
+
+
+@pytest.fixture()
+def disk_kv_connection(disk_db: None) -> KvStoreConnection:  # noqa: ARG001
+    """A KvStoreConnection wired to a file-backed DB (exercises WAL + locks)."""
     return _make_connection()
 
 
@@ -100,11 +126,15 @@ def _build_write_request(data: Dict[str, str]) -> KvStoreMessage:
     )
 
 
-def _open_dialogue(dialogues: KvStoreDialogues, message: KvStoreMessage) -> object:
+def _open_dialogue(
+    dialogues: KvStoreDialogues, message: KvStoreMessage
+) -> KvStoreDialogue:
     """Register a peer-initiated message and return the resulting dialogue."""
     message.sender = SKILL_ADDRESS
     message.to = CONNECTION_ADDRESS
-    return dialogues.update(message)
+    dialogue = dialogues.update(message)
+    assert dialogue is not None, "dialogue should pair for INITIAL_PERFORMATIVES"
+    return cast(KvStoreDialogue, dialogue)
 
 
 def test_read_request_filters_by_keys(kv_connection: KvStoreConnection) -> None:
@@ -116,8 +146,9 @@ def test_read_request_filters_by_keys(kv_connection: KvStoreConnection) -> None:
     message = _build_read_request(("a", "b"))
     dialogue = _open_dialogue(kv_connection.dialogues, message)
 
-    response = kv_connection.read_request(message, dialogue)  # type: ignore[arg-type]
+    response = kv_connection.read_request(message, dialogue)
 
+    assert response is not None
     assert response.performative == KvStoreMessage.Performative.READ_RESPONSE
     assert response.data == {"a": "1", "b": "2"}
 
@@ -130,8 +161,9 @@ def test_read_request_unknown_keys_return_empty_dict(
     message = _build_read_request(("missing-1", "missing-2"))
     dialogue = _open_dialogue(kv_connection.dialogues, message)
 
-    response = kv_connection.read_request(message, dialogue)  # type: ignore[arg-type]
+    response = kv_connection.read_request(message, dialogue)
 
+    assert response is not None
     assert response.performative == KvStoreMessage.Performative.READ_RESPONSE
     assert response.data == {}
 
@@ -144,8 +176,9 @@ def test_read_request_empty_keys_returns_empty_dict(
     message = _build_read_request(())
     dialogue = _open_dialogue(kv_connection.dialogues, message)
 
-    response = kv_connection.read_request(message, dialogue)  # type: ignore[arg-type]
+    response = kv_connection.read_request(message, dialogue)
 
+    assert response is not None
     assert response.performative == KvStoreMessage.Performative.READ_RESPONSE
     assert response.data == {}
 
@@ -159,17 +192,16 @@ def test_create_or_update_inserts_and_updates(
     message = _build_write_request({"existing": "new", "fresh": "value"})
     dialogue = _open_dialogue(kv_connection.dialogues, message)
 
-    response = kv_connection.create_or_update_request(
-        message, dialogue  # type: ignore[arg-type]
-    )
+    response = kv_connection.create_or_update_request(message, dialogue)
 
+    assert response is not None
     assert response.performative == KvStoreMessage.Performative.SUCCESS
     assert Store.get(Store.key == "existing").value == "new"
     assert Store.get(Store.key == "fresh").value == "value"
 
 
 def test_create_or_update_atomic_on_handler_error(
-    kv_connection: KvStoreConnection, monkeypatch: pytest.MonkeyPatch
+    disk_kv_connection: KvStoreConnection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A failure mid-batch rolls back earlier writes from the same batch."""
     real_create = Store.create
@@ -184,14 +216,13 @@ def test_create_or_update_atomic_on_handler_error(
     monkeypatch.setattr(Store, "create", flaky_create)
 
     message = _build_write_request({"k1": "v1", "k2": "v2", "k3": "v3"})
-    dialogue = _open_dialogue(kv_connection.dialogues, message)
+    dialogue = _open_dialogue(disk_kv_connection.dialogues, message)
 
-    response = kv_connection.create_or_update_request(
-        message, dialogue  # type: ignore[arg-type]
-    )
+    response = disk_kv_connection.create_or_update_request(message, dialogue)
 
+    assert response is not None
     assert response.performative == KvStoreMessage.Performative.ERROR
-    assert "synthetic mid-batch failure" in response.message
+    assert response.message == _GENERIC_ERROR_MESSAGE
     assert Store.select().count() == 0
 
 
@@ -208,12 +239,11 @@ def test_create_or_update_returns_error_when_db_raises(
     message = _build_write_request({"only": "key"})
     dialogue = _open_dialogue(kv_connection.dialogues, message)
 
-    response = kv_connection.create_or_update_request(
-        message, dialogue  # type: ignore[arg-type]
-    )
+    response = kv_connection.create_or_update_request(message, dialogue)
 
+    assert response is not None
     assert response.performative == KvStoreMessage.Performative.ERROR
-    assert "db unavailable" in response.message
+    assert response.message == _GENERIC_ERROR_MESSAGE
 
 
 def test_read_request_returns_error_when_db_raises(
@@ -229,10 +259,11 @@ def test_read_request_returns_error_when_db_raises(
     message = _build_read_request(("a",))
     dialogue = _open_dialogue(kv_connection.dialogues, message)
 
-    response = kv_connection.read_request(message, dialogue)  # type: ignore[arg-type]
+    response = kv_connection.read_request(message, dialogue)
 
+    assert response is not None
     assert response.performative == KvStoreMessage.Performative.ERROR
-    assert "read failure" in response.message
+    assert response.message == _GENERIC_ERROR_MESSAGE
 
 
 def test_on_send_drops_message_when_dialogue_cannot_be_built(
@@ -279,7 +310,7 @@ def test_on_send_replies_error_when_handler_raises(
     assert kv_connection.put_envelope.call_count == 1
     response = kv_connection.put_envelope.call_args[0][0].message
     assert response.performative == KvStoreMessage.Performative.ERROR
-    assert "handler boom" in response.message
+    assert response.message == _GENERIC_ERROR_MESSAGE
 
 
 def test_on_send_replies_error_when_handler_method_missing(
@@ -297,7 +328,7 @@ def test_on_send_replies_error_when_handler_method_missing(
     assert kv_connection.put_envelope.call_count == 1
     response = kv_connection.put_envelope.call_args[0][0].message
     assert response.performative == KvStoreMessage.Performative.ERROR
-    assert "read_request" in response.message
+    assert response.message == _GENERIC_ERROR_MESSAGE
 
 
 def test_on_send_happy_path_round_trips_a_read(
@@ -337,60 +368,52 @@ def test_value_field_accepts_long_payloads(
 
     write_msg = _build_write_request({"big": long_value})
     write_dialogue = _open_dialogue(kv_connection.dialogues, write_msg)
-    write_response = kv_connection.create_or_update_request(
-        write_msg, write_dialogue  # type: ignore[arg-type]
-    )
+    write_response = kv_connection.create_or_update_request(write_msg, write_dialogue)
+    assert write_response is not None
     assert write_response.performative == KvStoreMessage.Performative.SUCCESS
 
     read_msg = _build_read_request(("big",))
     read_dialogue = _open_dialogue(kv_connection.dialogues, read_msg)
-    read_response = kv_connection.read_request(
-        read_msg, read_dialogue  # type: ignore[arg-type]
-    )
+    read_response = kv_connection.read_request(read_msg, read_dialogue)
 
+    assert read_response is not None
     assert read_response.data == {"big": long_value}
 
 
-def test_concurrent_writes_do_not_deadlock(tmp_path: Any) -> None:
+def test_concurrent_writes_do_not_deadlock(
+    disk_kv_connection: KvStoreConnection,
+) -> None:
     """5 threads writing in parallel must all commit without SQLITE_BUSY."""
-    db_path = tmp_path / "concurrent.db"
-    conn_mod.db.init(str(db_path))
-    conn_mod.db.connect(reuse_if_open=True)
-    conn_mod.db.create_tables([Store])
-    instance = _make_connection()
+    instance = disk_kv_connection
+    payloads = [
+        {f"t{t}-b{b}-k{i}": f"v{t}-{b}-{i}" for i in range(3)}
+        for t in range(5)
+        for b in range(5)
+    ]
+    expected = {k: v for p in payloads for k, v in p.items()}
 
-    try:
-        payloads = [
-            {f"t{t}-b{b}-k{i}": f"v{t}-{b}-{i}" for i in range(3)}
-            for t in range(5)
-            for b in range(5)
-        ]
-        expected = {k: v for p in payloads for k, v in p.items()}
+    def submit_write(payload: Dict[str, str]) -> Optional[KvStoreMessage]:
+        message = _build_write_request(payload)
+        dialogue = _open_dialogue(instance.dialogues, message)
+        return instance.create_or_update_request(message, dialogue)
 
-        def submit_write(payload: Dict[str, str]) -> KvStoreMessage:
-            message = _build_write_request(payload)
-            dialogue = _open_dialogue(instance.dialogues, message)
-            return instance.create_or_update_request(message, dialogue)  # type: ignore[arg-type]
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        futures = [pool.submit(submit_write, p) for p in payloads]
+        responses = [f.result() for f in as_completed(futures)]
 
-        with ThreadPoolExecutor(max_workers=5) as pool:
-            futures = [pool.submit(submit_write, p) for p in payloads]
-            responses = [f.result() for f in as_completed(futures)]
+    assert all(r is not None for r in responses)
+    success = [
+        r
+        for r in responses
+        if r is not None and r.performative == KvStoreMessage.Performative.SUCCESS
+    ]
+    errors = [
+        r
+        for r in responses
+        if r is not None and r.performative == KvStoreMessage.Performative.ERROR
+    ]
+    assert not errors, [r.message for r in errors[:3]]
+    assert len(success) == len(payloads)
 
-        success = [
-            r
-            for r in responses
-            if r.performative == KvStoreMessage.Performative.SUCCESS
-        ]
-        errors = [
-            r for r in responses if r.performative == KvStoreMessage.Performative.ERROR
-        ]
-        assert not errors, [r.message for r in errors[:3]]
-        assert len(success) == len(payloads)
-
-        # Final verification: every key landed.
-        stored = {row.key: row.value for row in Store.select()}
-        assert stored == expected
-    finally:
-        if not conn_mod.db.is_closed():
-            conn_mod.db.drop_tables([Store])
-            conn_mod.db.close()
+    stored = {row.key: row.value for row in Store.select()}
+    assert stored == expected
