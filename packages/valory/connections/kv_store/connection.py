@@ -43,7 +43,17 @@ PUBLIC_ID = PublicId.from_str("valory/kv_store:0.1.0")
 
 db = SqliteDatabase(
     None,
-    pragmas={"journal_mode": "wal", "foreign_keys": 1},
+    pragmas={
+        "journal_mode": "wal",
+        "foreign_keys": 1,
+        # The pool dispatches up to MAX_WORKER_THREADS concurrent writes;
+        # WAL lets readers stay non-blocking but writes are still
+        # serialized. Without a busy_timeout, a worker that misses the
+        # writer lock by even a millisecond returns SQLITE_BUSY
+        # immediately. 5 s is more than enough to absorb the queue depth
+        # we see in practice and well under any sensible round timeout.
+        "busy_timeout": 5000,
+    },
 )
 
 
@@ -241,7 +251,10 @@ class KvStoreConnection(BaseSyncConnection):
         self.logger.debug(f"DB write keys: {list(message.data)}")
 
         try:
-            with db.atomic():
+            # IMMEDIATE acquires the writer lock at BEGIN time so a later
+            # SHARED→RESERVED upgrade cannot return SQLITE_BUSY; busy_timeout
+            # does not retry lock upgrades inside an open transaction.
+            with db.atomic(lock_type="IMMEDIATE"):
                 for k, v in message.data.items():
                     entry = Store.get_or_none(Store.key == k)
 

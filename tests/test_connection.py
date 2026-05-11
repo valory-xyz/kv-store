@@ -25,7 +25,10 @@ back to ``Store.key in keys`` makes ``test_read_request_filters_by_keys``
 return all rows instead of the requested subset.
 """
 
+import itertools
 import logging
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Tuple
 from unittest.mock import MagicMock
 
@@ -43,6 +46,15 @@ from packages.valory.protocols.kv_store.message import KvStoreMessage
 
 SKILL_ADDRESS = "test_author/test_skill:0.1.0"
 CONNECTION_ADDRESS = str(PUBLIC_ID)
+
+_REF_COUNTER = itertools.count()
+_REF_LOCK = threading.Lock()
+
+
+def _next_ref() -> str:
+    """Return a unique dialogue reference safe for concurrent callers."""
+    with _REF_LOCK:
+        return f"ref-{next(_REF_COUNTER)}"
 
 
 def _make_connection() -> KvStoreConnection:
@@ -83,7 +95,7 @@ def kv_connection(fresh_db: None) -> KvStoreConnection:  # noqa: ARG001
 def _build_read_request(keys: Tuple[str, ...]) -> KvStoreMessage:
     return KvStoreMessage(
         performative=KvStoreMessage.Performative.READ_REQUEST,
-        dialogue_reference=("ref0", ""),
+        dialogue_reference=(_next_ref(), ""),
         message_id=1,
         target=0,
         keys=keys,
@@ -93,7 +105,7 @@ def _build_read_request(keys: Tuple[str, ...]) -> KvStoreMessage:
 def _build_write_request(data: dict) -> KvStoreMessage:
     return KvStoreMessage(
         performative=KvStoreMessage.Performative.CREATE_OR_UPDATE_REQUEST,
-        dialogue_reference=("ref0", ""),
+        dialogue_reference=(_next_ref(), ""),
         message_id=1,
         target=0,
         data=data,
@@ -282,7 +294,7 @@ def test_on_send_drops_message_when_dialogue_cannot_be_built(
     # dialogues.update() returns None when it arrives as the first message.
     orphan = KvStoreMessage(
         performative=KvStoreMessage.Performative.READ_RESPONSE,
-        dialogue_reference=("ref0", ""),
+        dialogue_reference=(_next_ref(), ""),
         message_id=1,
         target=0,
         data={},
@@ -381,3 +393,68 @@ def test_value_field_accepts_long_payloads(
     )
 
     assert read_response.data == {"big": long_value}
+
+
+# ---------------------------------------------------------------------------
+# Concurrency: writes must not return SQLITE_BUSY under the 5-worker pool
+# the BaseSyncConnection uses in production.
+# ---------------------------------------------------------------------------
+
+
+def test_concurrent_writes_do_not_deadlock(tmp_path) -> None:
+    """5 threads writing in parallel must all commit without SQLITE_BUSY.
+
+    Regression for issue #12 P2 concurrency: BEGIN DEFERRED (peewee's
+    default) does not let busy_timeout retry SHARED→RESERVED upgrades
+    under contention, so the read-then-write loop inside
+    create_or_update_request used to surface "database is locked"
+    errors. Pinned to lock_type="IMMEDIATE" so the writer lock is taken
+    upfront.
+
+    Uses an on-disk SQLite path (the fresh_db fixture only sets up
+    :memory: and would not exercise WAL file-locking semantics).
+    """
+    db_path = tmp_path / "concurrent.db"
+    conn_mod.db.init(str(db_path))
+    conn_mod.db.connect(reuse_if_open=True)
+    conn_mod.db.create_tables([Store])
+    instance = _make_connection()
+
+    try:
+        # 5 threads × 5 batches × 3 keys = 75 writes total.
+        payloads = [
+            {f"t{t}-b{b}-k{i}": f"v{t}-{b}-{i}" for i in range(3)}
+            for t in range(5)
+            for b in range(5)
+        ]
+        expected = {k: v for p in payloads for k, v in p.items()}
+
+        def submit_write(payload):
+            message = _build_write_request(payload)
+            dialogue = _open_dialogue(instance.dialogues, message)
+            return instance.create_or_update_request(message, dialogue)  # type: ignore[arg-type]
+
+        with ThreadPoolExecutor(max_workers=5) as pool:
+            futures = [pool.submit(submit_write, p) for p in payloads]
+            responses = [f.result() for f in as_completed(futures)]
+
+        success = [
+            r
+            for r in responses
+            if r.performative == KvStoreMessage.Performative.SUCCESS
+        ]
+        errors = [
+            r for r in responses if r.performative == KvStoreMessage.Performative.ERROR
+        ]
+        # If lock_type is reverted to the default, expect "database is locked"
+        # errors here. The assertion below would fail with non-zero `errors`.
+        assert not errors, [r.message for r in errors[:3]]
+        assert len(success) == len(payloads)
+
+        # Final verification: every key landed.
+        stored = {row.key: row.value for row in Store.select()}
+        assert stored == expected
+    finally:
+        if not conn_mod.db.is_closed():
+            conn_mod.db.drop_tables([Store])
+            conn_mod.db.close()
