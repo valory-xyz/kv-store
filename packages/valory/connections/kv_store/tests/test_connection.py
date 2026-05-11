@@ -17,19 +17,13 @@
 #
 # ------------------------------------------------------------------------------
 
-"""Behavioural tests for the kv_store connection.
-
-Each test is structured so it would fail if the corresponding production
-fix from issue #12 were reverted, e.g. swapping ``Store.key.in_(keys)``
-back to ``Store.key in keys`` makes ``test_read_request_filters_by_keys``
-return all rows instead of the requested subset.
-"""
+"""Behavioural tests for the kv_store connection."""
 
 import itertools
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Tuple
+from typing import Any, Dict, Generator, Tuple
 from unittest.mock import MagicMock
 
 import pytest
@@ -58,13 +52,7 @@ def _next_ref() -> str:
 
 
 def _make_connection() -> KvStoreConnection:
-    """Construct a KvStoreConnection without invoking AEA framework init.
-
-    The handlers under test rely only on ``self.logger``, ``self.dialogues``
-    and ``self.put_envelope``. Bypassing ``BaseSyncConnection.__init__``
-    avoids the heavy AEA wiring (identity, crypto_store, event loop) the
-    real agent supplies at runtime.
-    """
+    """Construct a KvStoreConnection without invoking AEA framework init."""
     instance = KvStoreConnection.__new__(KvStoreConnection)
     instance.logger = logging.getLogger("test.kv_store")  # type: ignore[assignment]
     instance.dialogues = KvStoreDialogues(connection_id=PUBLIC_ID)
@@ -73,7 +61,7 @@ def _make_connection() -> KvStoreConnection:
 
 
 @pytest.fixture()
-def fresh_db() -> None:
+def fresh_db() -> Generator[None, None, None]:
     """Bind the module-level peewee DB to a fresh in-memory SQLite per test."""
     conn_mod.db.init(":memory:")
     conn_mod.db.connect(reuse_if_open=True)
@@ -94,7 +82,7 @@ def kv_connection(fresh_db: None) -> KvStoreConnection:  # noqa: ARG001
 
 def _build_read_request(keys: Tuple[str, ...]) -> KvStoreMessage:
     return KvStoreMessage(
-        performative=KvStoreMessage.Performative.READ_REQUEST,
+        performative=KvStoreMessage.Performative.READ_REQUEST,  # type: ignore[arg-type]
         dialogue_reference=(_next_ref(), ""),
         message_id=1,
         target=0,
@@ -102,9 +90,9 @@ def _build_read_request(keys: Tuple[str, ...]) -> KvStoreMessage:
     )
 
 
-def _build_write_request(data: dict) -> KvStoreMessage:
+def _build_write_request(data: Dict[str, str]) -> KvStoreMessage:
     return KvStoreMessage(
-        performative=KvStoreMessage.Performative.CREATE_OR_UPDATE_REQUEST,
+        performative=KvStoreMessage.Performative.CREATE_OR_UPDATE_REQUEST,  # type: ignore[arg-type]
         dialogue_reference=(_next_ref(), ""),
         message_id=1,
         target=0,
@@ -119,17 +107,8 @@ def _open_dialogue(dialogues: KvStoreDialogues, message: KvStoreMessage) -> obje
     return dialogues.update(message)
 
 
-# ---------------------------------------------------------------------------
-# P0: read_request must filter by the requested keys.
-# ---------------------------------------------------------------------------
-
-
 def test_read_request_filters_by_keys(kv_connection: KvStoreConnection) -> None:
-    """A read for a subset of keys returns only that subset.
-
-    Regression for issue #12 P0: ``Store.key in keys`` rendered ``WHERE ?``
-    bound to ``True`` and returned every row in the table.
-    """
+    """A read for a subset of keys returns only that subset."""
     Store.create(key="a", value="1")
     Store.create(key="b", value="2")
     Store.create(key="c", value="3")
@@ -171,11 +150,6 @@ def test_read_request_empty_keys_returns_empty_dict(
     assert response.data == {}
 
 
-# ---------------------------------------------------------------------------
-# P1: create_or_update_request must be atomic across all entries.
-# ---------------------------------------------------------------------------
-
-
 def test_create_or_update_inserts_and_updates(
     kv_connection: KvStoreConnection,
 ) -> None:
@@ -197,16 +171,11 @@ def test_create_or_update_inserts_and_updates(
 def test_create_or_update_atomic_on_handler_error(
     kv_connection: KvStoreConnection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A failure mid-batch rolls back earlier writes from the same batch.
-
-    Regression for issue #12 P1: prior to ``db.atomic()`` each key was
-    committed individually, leaving the store half-applied when the loop
-    raised partway through.
-    """
+    """A failure mid-batch rolls back earlier writes from the same batch."""
     real_create = Store.create
     call_count = {"n": 0}
 
-    def flaky_create(**kwargs):
+    def flaky_create(**kwargs: Any) -> Any:
         call_count["n"] += 1
         if call_count["n"] == 2:
             raise RuntimeError("synthetic mid-batch failure")
@@ -231,7 +200,7 @@ def test_create_or_update_returns_error_when_db_raises(
 ) -> None:
     """A DB-layer exception is converted to an ERROR reply, not propagated."""
 
-    def boom(**_kwargs):
+    def boom(**_kwargs: Any) -> Any:
         raise RuntimeError("db unavailable")
 
     monkeypatch.setattr(Store, "create", boom)
@@ -247,21 +216,12 @@ def test_create_or_update_returns_error_when_db_raises(
     assert "db unavailable" in response.message
 
 
-# ---------------------------------------------------------------------------
-# P1: read_request must handle DB errors with an ERROR reply.
-# ---------------------------------------------------------------------------
-
-
 def test_read_request_returns_error_when_db_raises(
     kv_connection: KvStoreConnection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A DB exception during read is converted to an ERROR reply.
+    """A DB exception during read is converted to an ERROR reply."""
 
-    Regression for issue #12 P1: previously the exception escaped
-    ``read_request`` and ``on_send``, leaving the caller hanging.
-    """
-
-    def boom(*_args, **_kwargs):
+    def boom(*_args: Any, **_kwargs: Any) -> Any:
         raise RuntimeError("read failure")
 
     monkeypatch.setattr(Store, "select", boom)
@@ -275,25 +235,14 @@ def test_read_request_returns_error_when_db_raises(
     assert "read failure" in response.message
 
 
-# ---------------------------------------------------------------------------
-# P1: on_send must always reply when a dialogue exists.
-# ---------------------------------------------------------------------------
-
-
 def test_on_send_drops_message_when_dialogue_cannot_be_built(
     kv_connection: KvStoreConnection, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """An unpairable message logs and does not crash on_send.
-
-    Regression for issue #12 P1: ``on_send`` previously crashed when it
-    tried to call ``getattr(self, performative.value)`` for a reply-only
-    performative used as an initial message. We now detect the failed
-    dialogue association first and short-circuit cleanly.
-    """
+    """An unpairable message logs and does not crash on_send."""
     # READ_RESPONSE is not in KvStoreDialogue.INITIAL_PERFORMATIVES, so
     # dialogues.update() returns None when it arrives as the first message.
     orphan = KvStoreMessage(
-        performative=KvStoreMessage.Performative.READ_RESPONSE,
+        performative=KvStoreMessage.Performative.READ_RESPONSE,  # type: ignore[arg-type]
         dialogue_reference=(_next_ref(), ""),
         message_id=1,
         target=0,
@@ -310,24 +259,12 @@ def test_on_send_drops_message_when_dialogue_cannot_be_built(
     assert any("Could not associate dialogue" in rec.message for rec in caplog.records)
 
 
-# Note: the protocol's INITIAL_PERFORMATIVES restrict initial messages to
-# READ_REQUEST and CREATE_OR_UPDATE_REQUEST; any other initial performative
-# causes dialogues.update() to return None and is exercised by the
-# `test_on_send_drops_message_when_dialogue_cannot_be_built` test above.
-# There is no realistic path that pairs a dialogue and then hands the
-# connection an unknown performative, so no separate test is needed.
-
-
 def test_on_send_replies_error_when_handler_raises(
     kv_connection: KvStoreConnection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """If the dispatched handler raises, on_send replies with ERROR.
+    """If the dispatched handler raises, on_send replies with ERROR."""
 
-    Regression for issue #12 P1: previously a handler exception escaped
-    ``on_send`` so no envelope was ever placed back on the queue.
-    """
-
-    def exploding_handler(_message, _dialogue):
+    def exploding_handler(_message: Any, _dialogue: Any) -> Any:
         raise RuntimeError("handler boom")
 
     monkeypatch.setattr(kv_connection, "read_request", exploding_handler)
@@ -343,6 +280,24 @@ def test_on_send_replies_error_when_handler_raises(
     response = kv_connection.put_envelope.call_args[0][0].message
     assert response.performative == KvStoreMessage.Performative.ERROR
     assert "handler boom" in response.message
+
+
+def test_on_send_replies_error_when_handler_method_missing(
+    kv_connection: KvStoreConnection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A paired dialogue with no matching handler method replies ERROR."""
+    request = _build_read_request(("a",))
+    request.sender = SKILL_ADDRESS
+    request.to = CONNECTION_ADDRESS
+    monkeypatch.delattr(KvStoreConnection, "read_request")
+    envelope = Envelope(to=CONNECTION_ADDRESS, sender=SKILL_ADDRESS, message=request)
+
+    kv_connection.on_send(envelope)
+
+    assert kv_connection.put_envelope.call_count == 1
+    response = kv_connection.put_envelope.call_args[0][0].message
+    assert response.performative == KvStoreMessage.Performative.ERROR
+    assert "read_request" in response.message
 
 
 def test_on_send_happy_path_round_trips_a_read(
@@ -364,22 +319,10 @@ def test_on_send_happy_path_round_trips_a_read(
     assert response.data == {"hello": "world"}
 
 
-# ---------------------------------------------------------------------------
-# P2: TextField accepts payloads larger than the old CharField cap.
-# ---------------------------------------------------------------------------
-
-
 def test_value_column_uses_text_not_varchar(
     kv_connection: KvStoreConnection,  # noqa: ARG001
 ) -> None:
-    """The Store.value column is rendered as TEXT in the SQL schema.
-
-    Regression for issue #12 P2: with CharField the DDL emits
-    ``VARCHAR(255)`` (capping values at 255 chars on backends that
-    enforce the constraint). SQLite ignores the length at runtime, so
-    the round-trip test below would pass either way — this schema check
-    is the gate that actually fails if someone reverts to CharField.
-    """
+    """The Store.value column is rendered as TEXT in the SQL schema."""
     info = conn_mod.db.execute_sql("PRAGMA table_info(store)").fetchall()
     value_col = next(col for col in info if col[1] == "value")
     col_type = value_col[2]
@@ -389,13 +332,7 @@ def test_value_column_uses_text_not_varchar(
 def test_value_field_accepts_long_payloads(
     kv_connection: KvStoreConnection,
 ) -> None:
-    """A value larger than 255 chars survives a write/read round-trip.
-
-    Companion to ``test_value_column_uses_text_not_varchar``: the
-    schema check above is the load-bearing assertion. This test
-    exercises the end-to-end path so the round-trip behaviour itself
-    is covered.
-    """
+    """A value larger than 255 chars survives a write/read round-trip."""
     long_value = "x" * 4096
 
     write_msg = _build_write_request({"big": long_value})
@@ -414,25 +351,8 @@ def test_value_field_accepts_long_payloads(
     assert read_response.data == {"big": long_value}
 
 
-# ---------------------------------------------------------------------------
-# Concurrency: writes must not return SQLITE_BUSY under the 5-worker pool
-# the BaseSyncConnection uses in production.
-# ---------------------------------------------------------------------------
-
-
-def test_concurrent_writes_do_not_deadlock(tmp_path) -> None:
-    """5 threads writing in parallel must all commit without SQLITE_BUSY.
-
-    Regression for issue #12 P2 concurrency: BEGIN DEFERRED (peewee's
-    default) does not let busy_timeout retry SHARED→RESERVED upgrades
-    under contention, so the read-then-write loop inside
-    create_or_update_request used to surface "database is locked"
-    errors. Pinned to lock_type="IMMEDIATE" so the writer lock is taken
-    upfront.
-
-    Uses an on-disk SQLite path (the fresh_db fixture only sets up
-    :memory: and would not exercise WAL file-locking semantics).
-    """
+def test_concurrent_writes_do_not_deadlock(tmp_path: Any) -> None:
+    """5 threads writing in parallel must all commit without SQLITE_BUSY."""
     db_path = tmp_path / "concurrent.db"
     conn_mod.db.init(str(db_path))
     conn_mod.db.connect(reuse_if_open=True)
@@ -440,7 +360,6 @@ def test_concurrent_writes_do_not_deadlock(tmp_path) -> None:
     instance = _make_connection()
 
     try:
-        # 5 threads × 5 batches × 3 keys = 75 writes total.
         payloads = [
             {f"t{t}-b{b}-k{i}": f"v{t}-{b}-{i}" for i in range(3)}
             for t in range(5)
@@ -448,7 +367,7 @@ def test_concurrent_writes_do_not_deadlock(tmp_path) -> None:
         ]
         expected = {k: v for p in payloads for k, v in p.items()}
 
-        def submit_write(payload):
+        def submit_write(payload: Dict[str, str]) -> KvStoreMessage:
             message = _build_write_request(payload)
             dialogue = _open_dialogue(instance.dialogues, message)
             return instance.create_or_update_request(message, dialogue)  # type: ignore[arg-type]
@@ -465,8 +384,6 @@ def test_concurrent_writes_do_not_deadlock(tmp_path) -> None:
         errors = [
             r for r in responses if r.performative == KvStoreMessage.Performative.ERROR
         ]
-        # If lock_type is reverted to the default, expect "database is locked"
-        # errors here. The assertion below would fail with non-zero `errors`.
         assert not errors, [r.message for r in errors[:3]]
         assert len(success) == len(payloads)
 

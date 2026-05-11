@@ -50,11 +50,7 @@ prerelease = "allow"
 # kv-store has no third_party packages on disk and no non-PyPI upstreams
 # beyond OA/open-aea, which tomte auto-derives from `[project].dependencies`.
 upstream_pins = []
-# Repo ships only an AEA protocol + connection — no first-party customs
-# or skills under packages/, so tomte's auto-discovery has nothing to
-# point pytest at. Pin a tests/ dir so the matrix env runs the smoke
-# import suite and doesn't exit 5 on "no tests ran".
-pytest_targets = ["tests"]
+pytest_targets = ["packages/valory/connections/kv_store/tests"]
 tomte_dep_pin = " @ git+https://github.com/valory-xyz/tomte.git@v0.7.0"
 
 [tool.uv.build-backend]

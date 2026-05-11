@@ -17,4 +17,4 @@
 #
 # ------------------------------------------------------------------------------
 
-"""Tests package for kv-store."""
+"""Tests for the kv_store connection."""

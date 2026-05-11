@@ -1,7 +1,7 @@
 {
     "dev": {
         "protocol/valory/kv_store/0.1.0": "bafybeia5olmoljxmwymwdlw6egrjcsbm3r2olayycz3dpbg57bqtij75mq",
-        "connection/valory/kv_store/0.1.0": "bafybeigtlpni532ymf4jfb3mfz5efanmeesdefxxtulapekfoxnlg43jia"
+        "connection/valory/kv_store/0.1.0": "bafybeifs5phkgiifnxxsduauq454go34xttijcsph7xxmrfhxzql7zhdde"
     },
     "third_party": {}
 }
