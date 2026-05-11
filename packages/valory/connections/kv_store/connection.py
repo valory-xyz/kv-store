@@ -179,7 +179,9 @@ class KvStoreConnection(BaseSyncConnection):
             # against, so we log and drop. The caller surfaces this via its
             # own timeout.
             self.logger.error(
-                f"Could not associate dialogue with message: {kv_store_message}"
+                "Could not associate dialogue with message "
+                f"(performative={kv_store_message.performative.value}, "
+                f"dialogue_reference={kv_store_message.dialogue_reference})."
             )
             return
 
