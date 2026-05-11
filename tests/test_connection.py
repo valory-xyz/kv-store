@@ -369,13 +369,32 @@ def test_on_send_happy_path_round_trips_a_read(
 # ---------------------------------------------------------------------------
 
 
+def test_value_column_uses_text_not_varchar(
+    kv_connection: KvStoreConnection,  # noqa: ARG001
+) -> None:
+    """The Store.value column is rendered as TEXT in the SQL schema.
+
+    Regression for issue #12 P2: with CharField the DDL emits
+    ``VARCHAR(255)`` (capping values at 255 chars on backends that
+    enforce the constraint). SQLite ignores the length at runtime, so
+    the round-trip test below would pass either way — this schema check
+    is the gate that actually fails if someone reverts to CharField.
+    """
+    info = conn_mod.db.execute_sql("PRAGMA table_info(store)").fetchall()
+    value_col = next(col for col in info if col[1] == "value")
+    col_type = value_col[2]
+    assert col_type == "TEXT", f"expected TEXT, got {col_type!r}"
+
+
 def test_value_field_accepts_long_payloads(
     kv_connection: KvStoreConnection,
 ) -> None:
     """A value larger than 255 chars survives a write/read round-trip.
 
-    Regression for issue #12 P2: the previous CharField default capped at
-    255 chars; TextField has no length cap.
+    Companion to ``test_value_column_uses_text_not_varchar``: the
+    schema check above is the load-bearing assertion. This test
+    exercises the end-to-end path so the round-trip behaviour itself
+    is covered.
     """
     long_value = "x" * 4096
 
