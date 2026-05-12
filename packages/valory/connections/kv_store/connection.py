@@ -21,14 +21,14 @@
 """Key-value connection and channel."""
 
 from pathlib import Path
-from typing import Any, Callable, cast
+from typing import Any, Callable, Optional, cast
 
 from aea.configurations.base import PublicId
 from aea.connections.base import BaseSyncConnection
 from aea.mail.base import Envelope
 from aea.protocols.base import Address, Message
 from aea.protocols.dialogue.base import Dialogue
-from peewee import CharField, Model, SqliteDatabase  # type: ignore
+from peewee import CharField, Model, SqliteDatabase, TextField  # type: ignore
 
 from packages.valory.protocols.kv_store.dialogues import (
     KvStoreDialogue,
@@ -40,8 +40,17 @@ from packages.valory.protocols.kv_store.message import KvStoreMessage
 
 PUBLIC_ID = PublicId.from_str("valory/kv_store:0.1.0")
 
+_GENERIC_ERROR_MESSAGE = "Internal handler error"
 
-db = SqliteDatabase(None)
+
+db = SqliteDatabase(
+    None,
+    pragmas={
+        "journal_mode": "wal",
+        "foreign_keys": 1,
+        "busy_timeout": 5000,
+    },
+)
 
 
 class BaseModel(Model):
@@ -57,7 +66,7 @@ class Store(BaseModel):
     """Database Store table"""
 
     key = CharField(unique=True)
-    value = CharField()
+    value = TextField()
 
 
 class KvStoreDialogues(BaseKvStoreDialogues):
@@ -149,6 +158,23 @@ class KvStoreConnection(BaseSyncConnection):
         can be created in the event callback.
         """
 
+    def _error_reply(
+        self, dialogue: KvStoreDialogue, target_message: KvStoreMessage
+    ) -> Optional[KvStoreMessage]:
+        """Build an ERROR reply, returning None if the reply itself fails."""
+        try:
+            return cast(
+                KvStoreMessage,
+                dialogue.reply(
+                    performative=KvStoreMessage.Performative.ERROR,
+                    target_message=target_message,
+                    message=_GENERIC_ERROR_MESSAGE,
+                ),
+            )
+        except Exception:  # pylint: disable=broad-exception-caught
+            self.logger.exception("Failed to build ERROR reply; dropping message.")
+            return None
+
     def on_send(self, envelope: Envelope) -> None:
         """
         Send an envelope.
@@ -156,21 +182,31 @@ class KvStoreConnection(BaseSyncConnection):
         :param envelope: the envelope to send.
         """
         kv_store_message = cast(KvStoreMessage, envelope.message)
-        dialogue = self.dialogues.update(kv_store_message)
+        dialogue: Optional[KvStoreDialogue] = self.dialogues.update(kv_store_message)
 
-        if kv_store_message.performative not in [
-            KvStoreMessage.Performative.READ_REQUEST,
-            KvStoreMessage.Performative.CREATE_OR_UPDATE_REQUEST,
-        ]:
+        if dialogue is None:
             self.logger.error(
-                f"Performative `{kv_store_message.performative.value}` is not supported."
+                "Could not associate dialogue with message "
+                f"(performative={kv_store_message.performative.value}, "
+                f"dialogue_reference={kv_store_message.dialogue_reference})."
             )
             return
 
-        handler: Callable[[KvStoreMessage, KvStoreDialogue], KvStoreMessage] = getattr(
-            self, kv_store_message.performative.value
-        )
-        response = handler(kv_store_message, dialogue)  # type: ignore
+        response: Optional[KvStoreMessage]
+        try:
+            handler: Callable[[KvStoreMessage, KvStoreDialogue], KvStoreMessage] = (
+                getattr(self, kv_store_message.performative.value)
+            )
+            response = handler(kv_store_message, dialogue)
+        except Exception:  # pylint: disable=broad-exception-caught
+            self.logger.exception(
+                f"Handler `{kv_store_message.performative.value}` raised."
+            )
+            response = self._error_reply(dialogue, kv_store_message)
+
+        if response is None:
+            return
+
         response_envelope = Envelope(
             to=envelope.sender,
             sender=envelope.to,
@@ -183,40 +219,46 @@ class KvStoreConnection(BaseSyncConnection):
         self,
         message: KvStoreMessage,
         dialogue: KvStoreDialogue,
-    ) -> KvStoreMessage:
+    ) -> Optional[KvStoreMessage]:
         """Read several keys."""
-        keys = message.keys if isinstance(message.keys, tuple) else (message.keys)
-        self.logger.info(f"DB read: {keys}")
-        query = Store.select().where(Store.key in keys)
-        response_data = {entry.key: entry.value for entry in query}
-
-        return cast(
-            KvStoreMessage,
-            dialogue.reply(
-                performative=KvStoreMessage.Performative.READ_RESPONSE,
-                target_message=message,
-                data=response_data,
-            ),
-        )
+        keys = message.keys
+        self.logger.info(f"DB read: {len(keys)} keys")
+        self.logger.debug(f"DB read keys: {keys}")
+        try:
+            query = Store.select().where(Store.key.in_(keys))
+            response_data = {entry.key: entry.value for entry in query}
+            return cast(
+                KvStoreMessage,
+                dialogue.reply(
+                    performative=KvStoreMessage.Performative.READ_RESPONSE,
+                    target_message=message,
+                    data=response_data,
+                ),
+            )
+        except Exception:  # pylint: disable=broad-exception-caught
+            self.logger.exception("DB read failed.")
+            return self._error_reply(dialogue, message)
 
     def create_or_update_request(
         self,
         message: KvStoreMessage,
         dialogue: KvStoreDialogue,
-    ) -> KvStoreMessage:
+    ) -> Optional[KvStoreMessage]:
         """Write several key-value pairs."""
 
-        self.logger.info(f"DB write: {message.data}")
+        self.logger.info(f"DB write: {len(message.data)} keys")
+        self.logger.debug(f"DB write keys: {list(message.data)}")
 
         try:
-            for k, v in message.data.items():
-                entry = Store.get_or_none(Store.key == k)
+            with db.atomic(lock_type="IMMEDIATE"):
+                for k, v in message.data.items():
+                    entry = Store.get_or_none(Store.key == k)
 
-                if not entry:
-                    Store.create(key=k, value=v)
-                else:
-                    entry.value = v
-                    entry.save()
+                    if not entry:
+                        Store.create(key=k, value=v)
+                    else:
+                        entry.value = v
+                        entry.save()
 
             return cast(
                 KvStoreMessage,
@@ -226,15 +268,9 @@ class KvStoreConnection(BaseSyncConnection):
                     message="OK",
                 ),
             )
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            return cast(
-                KvStoreMessage,
-                dialogue.reply(
-                    performative=KvStoreMessage.Performative.ERROR,
-                    target_message=message,
-                    message=str(e),
-                ),
-            )
+        except Exception:  # pylint: disable=broad-exception-caught
+            self.logger.exception("DB write failed.")
+            return self._error_reply(dialogue, message)
 
     def on_connect(self) -> None:
         """Set up the connection"""
@@ -250,3 +286,10 @@ class KvStoreConnection(BaseSyncConnection):
 
         Connection status set automatically.
         """
+        if db.is_closed():
+            return
+        try:
+            db.close()
+            self.logger.info("KV database connection closed")
+        except Exception:  # pylint: disable=broad-exception-caught
+            self.logger.exception("KV database close failed.")
