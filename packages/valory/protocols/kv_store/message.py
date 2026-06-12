@@ -42,7 +42,10 @@ class KvStoreMessage(Message):
         """Performatives for the kv_store protocol."""
 
         CREATE_OR_UPDATE_REQUEST = "create_or_update_request"
+        DELETE_REQUEST = "delete_request"
         ERROR = "error"
+        LIST_REQUEST = "list_request"
+        LIST_RESPONSE = "list_response"
         READ_REQUEST = "read_request"
         READ_RESPONSE = "read_response"
         SUCCESS = "success"
@@ -53,7 +56,10 @@ class KvStoreMessage(Message):
 
     _performatives = {
         "create_or_update_request",
+        "delete_request",
         "error",
+        "list_request",
+        "list_response",
         "read_request",
         "read_response",
         "success",
@@ -64,6 +70,7 @@ class KvStoreMessage(Message):
         __slots__ = (
             "data",
             "dialogue_reference",
+            "key_prefix",
             "keys",
             "message",
             "message_id",
@@ -130,6 +137,12 @@ class KvStoreMessage(Message):
         """Get the 'data' content from the message."""
         enforce(self.is_set("data"), "'data' content is not set.")
         return cast(Dict[str, str], self.get("data"))
+
+    @property
+    def key_prefix(self) -> str:
+        """Get the 'key_prefix' content from the message."""
+        enforce(self.is_set("key_prefix"), "'key_prefix' content is not set.")
+        return cast(str, self.get("key_prefix"))
 
     @property
     def keys(self) -> Tuple[str, ...]:
@@ -226,6 +239,47 @@ class KvStoreMessage(Message):
                 self.performative
                 == KvStoreMessage.Performative.CREATE_OR_UPDATE_REQUEST
             ):
+                expected_nb_of_contents = 1
+                enforce(
+                    isinstance(self.data, dict),
+                    "Invalid type for content 'data'. Expected 'dict'. Found '{}'.".format(
+                        type(self.data)
+                    ),
+                )
+                for key_of_data, value_of_data in self.data.items():
+                    enforce(
+                        isinstance(key_of_data, str),
+                        "Invalid type for dictionary keys in content 'data'. Expected 'str'. Found '{}'.".format(
+                            type(key_of_data)
+                        ),
+                    )
+                    enforce(
+                        isinstance(value_of_data, str),
+                        "Invalid type for dictionary values in content 'data'. Expected 'str'. Found '{}'.".format(
+                            type(value_of_data)
+                        ),
+                    )
+            elif self.performative == KvStoreMessage.Performative.DELETE_REQUEST:
+                expected_nb_of_contents = 1
+                enforce(
+                    isinstance(self.keys, tuple),
+                    "Invalid type for content 'keys'. Expected 'tuple'. Found '{}'.".format(
+                        type(self.keys)
+                    ),
+                )
+                enforce(
+                    all(isinstance(element, str) for element in self.keys),
+                    "Invalid type for tuple elements in content 'keys'. Expected 'str'.",
+                )
+            elif self.performative == KvStoreMessage.Performative.LIST_REQUEST:
+                expected_nb_of_contents = 1
+                enforce(
+                    isinstance(self.key_prefix, str),
+                    "Invalid type for content 'key_prefix'. Expected 'str'. Found '{}'.".format(
+                        type(self.key_prefix)
+                    ),
+                )
+            elif self.performative == KvStoreMessage.Performative.LIST_RESPONSE:
                 expected_nb_of_contents = 1
                 enforce(
                     isinstance(self.data, dict),

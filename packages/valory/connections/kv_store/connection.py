@@ -272,6 +272,70 @@ class KvStoreConnection(BaseSyncConnection):
             self.logger.exception("DB write failed.")
             return self._error_reply(dialogue, message)
 
+    def delete_request(
+        self,
+        message: KvStoreMessage,
+        dialogue: KvStoreDialogue,
+    ) -> Optional[KvStoreMessage]:
+        """Delete several keys.
+
+        Missing keys are not an error: the operation is set-difference
+        semantics, so the caller can re-run the same delete idempotently.
+        An empty key list is a no-op that still returns SUCCESS.
+        """
+        keys = message.keys
+        self.logger.info(f"DB delete: {len(keys)} keys")
+        self.logger.debug(f"DB delete keys: {list(keys)}")
+
+        try:
+            with db.atomic(lock_type="IMMEDIATE"):
+                if keys:
+                    Store.delete().where(Store.key.in_(list(keys))).execute()
+
+            return cast(
+                KvStoreMessage,
+                dialogue.reply(
+                    performative=KvStoreMessage.Performative.SUCCESS,
+                    target_message=message,
+                    message="OK",
+                ),
+            )
+        except Exception:  # pylint: disable=broad-exception-caught
+            self.logger.exception("DB delete failed.")
+            return self._error_reply(dialogue, message)
+
+    def list_request(
+        self,
+        message: KvStoreMessage,
+        dialogue: KvStoreDialogue,
+    ) -> Optional[KvStoreMessage]:
+        """List key-value pairs whose key matches the given prefix.
+
+        An empty ``key_prefix`` matches every row in the table; callers using
+        an empty prefix on a hot store are responsible for paginating in
+        application code (the protocol does not chunk the response).
+        """
+        prefix = message.key_prefix
+        self.logger.info(f"DB list: prefix=({prefix!r}) len={len(prefix)}")
+
+        try:
+            if prefix:
+                query = Store.select().where(Store.key.startswith(prefix))
+            else:
+                query = Store.select()
+            response_data = {entry.key: entry.value for entry in query}
+            return cast(
+                KvStoreMessage,
+                dialogue.reply(
+                    performative=KvStoreMessage.Performative.LIST_RESPONSE,
+                    target_message=message,
+                    data=response_data,
+                ),
+            )
+        except Exception:  # pylint: disable=broad-exception-caught
+            self.logger.exception("DB list failed.")
+            return self._error_reply(dialogue, message)
+
     def on_connect(self) -> None:
         """Set up the connection"""
         db.init(self.db_path)

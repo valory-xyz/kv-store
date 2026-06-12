@@ -126,6 +126,26 @@ def _build_write_request(data: Dict[str, str]) -> KvStoreMessage:
     )
 
 
+def _build_delete_request(keys: Tuple[str, ...]) -> KvStoreMessage:
+    return KvStoreMessage(
+        performative=KvStoreMessage.Performative.DELETE_REQUEST,  # type: ignore[arg-type]
+        dialogue_reference=(_next_ref(), ""),
+        message_id=1,
+        target=0,
+        keys=keys,
+    )
+
+
+def _build_list_request(key_prefix: str) -> KvStoreMessage:
+    return KvStoreMessage(
+        performative=KvStoreMessage.Performative.LIST_REQUEST,  # type: ignore[arg-type]
+        dialogue_reference=(_next_ref(), ""),
+        message_id=1,
+        target=0,
+        key_prefix=key_prefix,
+    )
+
+
 def _open_dialogue(
     dialogues: KvStoreDialogues, message: KvStoreMessage
 ) -> KvStoreDialogue:
@@ -244,6 +264,171 @@ def test_create_or_update_returns_error_when_db_raises(
     assert response is not None
     assert response.performative == KvStoreMessage.Performative.ERROR
     assert response.message == _GENERIC_ERROR_MESSAGE
+
+
+def test_delete_request_removes_matching_keys(
+    kv_connection: KvStoreConnection,
+) -> None:
+    """Delete drops matching rows and leaves the rest untouched."""
+    Store.create(key="a", value="1")
+    Store.create(key="b", value="2")
+    Store.create(key="c", value="3")
+
+    message = _build_delete_request(("a", "c"))
+    dialogue = _open_dialogue(kv_connection.dialogues, message)
+
+    response = kv_connection.delete_request(message, dialogue)
+
+    assert response is not None
+    assert response.performative == KvStoreMessage.Performative.SUCCESS
+    remaining = {row.key: row.value for row in Store.select()}
+    assert remaining == {"b": "2"}
+
+
+def test_delete_request_missing_keys_is_idempotent(
+    kv_connection: KvStoreConnection,
+) -> None:
+    """Deleting keys that do not exist is a no-op, not an error."""
+    Store.create(key="a", value="1")
+
+    message = _build_delete_request(("missing-1", "missing-2"))
+    dialogue = _open_dialogue(kv_connection.dialogues, message)
+
+    response = kv_connection.delete_request(message, dialogue)
+
+    assert response is not None
+    assert response.performative == KvStoreMessage.Performative.SUCCESS
+    assert {row.key for row in Store.select()} == {"a"}
+
+
+def test_delete_request_empty_keys_is_noop(
+    kv_connection: KvStoreConnection,
+) -> None:
+    """An empty key list returns SUCCESS without touching the table."""
+    Store.create(key="a", value="1")
+
+    message = _build_delete_request(())
+    dialogue = _open_dialogue(kv_connection.dialogues, message)
+
+    response = kv_connection.delete_request(message, dialogue)
+
+    assert response is not None
+    assert response.performative == KvStoreMessage.Performative.SUCCESS
+    assert {row.key for row in Store.select()} == {"a"}
+
+
+def test_delete_request_returns_error_when_db_raises(
+    kv_connection: KvStoreConnection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A DB exception during delete is converted to an ERROR reply."""
+
+    def boom(*_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError("delete failure")
+
+    monkeypatch.setattr(Store, "delete", boom)
+
+    message = _build_delete_request(("a",))
+    dialogue = _open_dialogue(kv_connection.dialogues, message)
+
+    response = kv_connection.delete_request(message, dialogue)
+
+    assert response is not None
+    assert response.performative == KvStoreMessage.Performative.ERROR
+    assert response.message == _GENERIC_ERROR_MESSAGE
+
+
+def test_list_request_filters_by_prefix(
+    kv_connection: KvStoreConnection,
+) -> None:
+    """List returns only rows whose key starts with the given prefix."""
+    Store.create(key="preimage:1", value="a")
+    Store.create(key="preimage:2", value="b")
+    Store.create(key="other:1", value="c")
+
+    message = _build_list_request("preimage:")
+    dialogue = _open_dialogue(kv_connection.dialogues, message)
+
+    response = kv_connection.list_request(message, dialogue)
+
+    assert response is not None
+    assert response.performative == KvStoreMessage.Performative.LIST_RESPONSE
+    assert response.data == {"preimage:1": "a", "preimage:2": "b"}
+
+
+def test_list_request_no_matches_returns_empty(
+    kv_connection: KvStoreConnection,
+) -> None:
+    """A prefix that matches no rows yields an empty response, not an error."""
+    Store.create(key="other:1", value="a")
+
+    message = _build_list_request("preimage:")
+    dialogue = _open_dialogue(kv_connection.dialogues, message)
+
+    response = kv_connection.list_request(message, dialogue)
+
+    assert response is not None
+    assert response.performative == KvStoreMessage.Performative.LIST_RESPONSE
+    assert response.data == {}
+
+
+def test_list_request_empty_prefix_returns_all_rows(
+    kv_connection: KvStoreConnection,
+) -> None:
+    """An empty prefix matches every row in the table."""
+    # Sweeper use-case: caller wants to enumerate every entry for retention
+    # filtering when they don't know all the prefixes in use.
+    Store.create(key="preimage:1", value="a")
+    Store.create(key="metric:cpu", value="b")
+    Store.create(key="lock", value="c")
+
+    message = _build_list_request("")
+    dialogue = _open_dialogue(kv_connection.dialogues, message)
+
+    response = kv_connection.list_request(message, dialogue)
+
+    assert response is not None
+    assert response.performative == KvStoreMessage.Performative.LIST_RESPONSE
+    assert response.data == {"preimage:1": "a", "metric:cpu": "b", "lock": "c"}
+
+
+def test_list_request_returns_error_when_db_raises(
+    kv_connection: KvStoreConnection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A DB exception during list is converted to an ERROR reply."""
+
+    def boom(*_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError("list failure")
+
+    monkeypatch.setattr(Store, "select", boom)
+
+    message = _build_list_request("preimage:")
+    dialogue = _open_dialogue(kv_connection.dialogues, message)
+
+    response = kv_connection.list_request(message, dialogue)
+
+    assert response is not None
+    assert response.performative == KvStoreMessage.Performative.ERROR
+    assert response.message == _GENERIC_ERROR_MESSAGE
+
+
+def test_delete_then_list_roundtrip(
+    kv_connection: KvStoreConnection,
+) -> None:
+    """A delete is reflected on the very next list call (sweeper happy path)."""
+    Store.create(key="preimage:1", value="a")
+    Store.create(key="preimage:2", value="b")
+
+    delete_msg = _build_delete_request(("preimage:1",))
+    delete_dlg = _open_dialogue(kv_connection.dialogues, delete_msg)
+    delete_resp = kv_connection.delete_request(delete_msg, delete_dlg)
+    assert delete_resp is not None
+    assert delete_resp.performative == KvStoreMessage.Performative.SUCCESS
+
+    list_msg = _build_list_request("preimage:")
+    list_dlg = _open_dialogue(kv_connection.dialogues, list_msg)
+    list_resp = kv_connection.list_request(list_msg, list_dlg)
+    assert list_resp is not None
+    assert list_resp.data == {"preimage:2": "b"}
 
 
 def test_read_request_returns_error_when_db_raises(

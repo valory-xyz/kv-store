@@ -69,6 +69,21 @@ class KvStoreSerializer(Serializer):
             data = msg.data
             performative.data.update(data)
             kv_store_msg.create_or_update_request.CopyFrom(performative)
+        elif performative_id == KvStoreMessage.Performative.DELETE_REQUEST:
+            performative = kv_store_pb2.KvStoreMessage.Delete_Request_Performative()  # type: ignore
+            keys = msg.keys
+            performative.keys.extend(keys)
+            kv_store_msg.delete_request.CopyFrom(performative)
+        elif performative_id == KvStoreMessage.Performative.LIST_REQUEST:
+            performative = kv_store_pb2.KvStoreMessage.List_Request_Performative()  # type: ignore
+            key_prefix = msg.key_prefix
+            performative.key_prefix = key_prefix
+            kv_store_msg.list_request.CopyFrom(performative)
+        elif performative_id == KvStoreMessage.Performative.LIST_RESPONSE:
+            performative = kv_store_pb2.KvStoreMessage.List_Response_Performative()  # type: ignore
+            data = msg.data
+            performative.data.update(data)
+            kv_store_msg.list_response.CopyFrom(performative)
         elif performative_id == KvStoreMessage.Performative.SUCCESS:
             performative = kv_store_pb2.KvStoreMessage.Success_Performative()  # type: ignore
             message = msg.message
@@ -120,6 +135,17 @@ class KvStoreSerializer(Serializer):
             performative_content["data"] = data_dict
         elif performative_id == KvStoreMessage.Performative.CREATE_OR_UPDATE_REQUEST:
             data = kv_store_pb.create_or_update_request.data
+            data_dict = dict(data)
+            performative_content["data"] = data_dict
+        elif performative_id == KvStoreMessage.Performative.DELETE_REQUEST:
+            keys = kv_store_pb.delete_request.keys
+            keys_tuple = tuple(keys)
+            performative_content["keys"] = keys_tuple
+        elif performative_id == KvStoreMessage.Performative.LIST_REQUEST:
+            key_prefix = kv_store_pb.list_request.key_prefix
+            performative_content["key_prefix"] = key_prefix
+        elif performative_id == KvStoreMessage.Performative.LIST_RESPONSE:
+            data = kv_store_pb.list_response.data
             data_dict = dict(data)
             performative_content["data"] = data_dict
         elif performative_id == KvStoreMessage.Performative.SUCCESS:
