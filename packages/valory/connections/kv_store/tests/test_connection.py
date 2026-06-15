@@ -28,6 +28,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from aea.mail.base import Envelope
+from aea.protocols.dialogue.base import InvalidDialogueMessage
 
 from packages.valory.connections.kv_store import connection as conn_mod
 from packages.valory.connections.kv_store.connection import (
@@ -39,6 +40,7 @@ from packages.valory.connections.kv_store.connection import (
     _GENERIC_ERROR_MESSAGE,
 )
 from packages.valory.protocols.kv_store.message import KvStoreMessage
+from packages.valory.protocols.kv_store.serialization import KvStoreSerializer
 
 SKILL_ADDRESS = "test_author/test_skill:0.1.0"
 CONNECTION_ADDRESS = str(PUBLIC_ID)
@@ -143,6 +145,16 @@ def _build_list_request(key_prefix: str) -> KvStoreMessage:
         message_id=1,
         target=0,
         key_prefix=key_prefix,
+    )
+
+
+def _build_list_response(data: Dict[str, str]) -> KvStoreMessage:
+    return KvStoreMessage(
+        performative=KvStoreMessage.Performative.LIST_RESPONSE,  # type: ignore[arg-type]
+        dialogue_reference=(_next_ref(), ""),
+        message_id=1,
+        target=0,
+        data=data,
     )
 
 
@@ -391,17 +403,18 @@ def test_list_request_empty_prefix_returns_all_rows(
     assert response.data == {"preimage:1": "a", "metric:cpu": "b", "lock": "c"}
 
 
+@pytest.mark.parametrize("prefix", ["preimage:", ""])
 def test_list_request_returns_error_when_db_raises(
-    kv_connection: KvStoreConnection, monkeypatch: pytest.MonkeyPatch
+    kv_connection: KvStoreConnection, monkeypatch: pytest.MonkeyPatch, prefix: str
 ) -> None:
-    """A DB exception during list is converted to an ERROR reply."""
+    """A DB exception during list converts to an ERROR reply (both branches)."""
 
     def boom(*_args: Any, **_kwargs: Any) -> Any:
         raise RuntimeError("list failure")
 
     monkeypatch.setattr(Store, "select", boom)
 
-    message = _build_list_request("preimage:")
+    message = _build_list_request(prefix)
     dialogue = _open_dialogue(kv_connection.dialogues, message)
 
     response = kv_connection.list_request(message, dialogue)
@@ -602,3 +615,122 @@ def test_concurrent_writes_do_not_deadlock(
 
     stored = {row.key: row.value for row in Store.select()}
     assert stored == expected
+
+
+# --- serialization round-trips for the new performatives --------------------
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        _build_delete_request(("a", "b")),
+        _build_delete_request(()),
+        _build_list_request("preimage:"),
+        _build_list_request(""),
+        _build_list_response({"preimage:1": "v1", "preimage:2": "v2"}),
+        _build_list_response({}),
+    ],
+    ids=[
+        "delete",
+        "delete_empty",
+        "list_req",
+        "list_req_empty",
+        "list_resp",
+        "list_resp_empty",
+    ],
+)
+def test_serialization_round_trip(message: KvStoreMessage) -> None:
+    """Encode then decode reproduces each new performative's message."""
+    decoded = KvStoreSerializer.decode(KvStoreSerializer.encode(message))
+    assert decoded == message
+
+
+# --- on_send dispatch for the new request performatives ----------------------
+
+
+def test_on_send_dispatches_delete_request(kv_connection: KvStoreConnection) -> None:
+    """DELETE_REQUEST dispatches through on_send to its handler and replies."""
+    Store.create(key="preimage:1", value="v1")
+    request = _build_delete_request(("preimage:1",))
+    request.sender = SKILL_ADDRESS
+    request.to = CONNECTION_ADDRESS
+    envelope = Envelope(to=CONNECTION_ADDRESS, sender=SKILL_ADDRESS, message=request)
+
+    kv_connection.on_send(envelope)
+
+    assert kv_connection.put_envelope.call_count == 1
+    response = kv_connection.put_envelope.call_args[0][0].message
+    assert response.performative == KvStoreMessage.Performative.SUCCESS
+
+
+def test_on_send_dispatches_list_request(kv_connection: KvStoreConnection) -> None:
+    """LIST_REQUEST round-trips through on_send -> handler -> put_envelope."""
+    Store.create(key="preimage:1", value="v1")
+    request = _build_list_request("preimage:")
+    request.sender = SKILL_ADDRESS
+    request.to = CONNECTION_ADDRESS
+    envelope = Envelope(to=CONNECTION_ADDRESS, sender=SKILL_ADDRESS, message=request)
+
+    kv_connection.on_send(envelope)
+
+    assert kv_connection.put_envelope.call_count == 1
+    response = kv_connection.put_envelope.call_args[0][0].message
+    assert response.performative == KvStoreMessage.Performative.LIST_RESPONSE
+    assert response.data == {"preimage:1": "v1"}
+
+
+# --- delete empty-keys is a true no-op (no Store.delete issued) ---------------
+
+
+def test_delete_request_empty_keys_does_not_call_delete(
+    kv_connection: KvStoreConnection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An empty key list skips the DELETE entirely (the `if keys:` guard)."""
+    delete_spy = MagicMock(
+        side_effect=AssertionError("Store.delete must not be called for empty keys")
+    )
+    monkeypatch.setattr(Store, "delete", delete_spy)
+
+    message = _build_delete_request(())
+    dialogue = _open_dialogue(kv_connection.dialogues, message)
+    response = kv_connection.delete_request(message, dialogue)
+
+    assert response is not None
+    assert response.performative == KvStoreMessage.Performative.SUCCESS
+    delete_spy.assert_not_called()
+
+
+# --- case-sensitive prefix matching ------------------------------------------
+
+
+def test_list_request_prefix_is_case_sensitive(
+    kv_connection: KvStoreConnection,
+) -> None:
+    """Prefix matching is case-sensitive, so a sweeper can't over-match."""
+    Store.create(key="preimage:1", value="v1")
+    Store.create(key="PREIMAGE:2", value="v2")
+
+    message = _build_list_request("preimage:")
+    dialogue = _open_dialogue(kv_connection.dialogues, message)
+    response = kv_connection.list_request(message, dialogue)
+
+    assert response is not None
+    assert response.data == {"preimage:1": "v1"}
+
+
+# --- dialogue rejects an invalid reply (VALID_REPLIES enforcement) -----------
+
+
+def test_dialogue_rejects_invalid_reply_to_delete_request(
+    kv_connection: KvStoreConnection,
+) -> None:
+    """A READ_RESPONSE reply to a DELETE_REQUEST is rejected by the dialogue."""
+    message = _build_delete_request(("a",))
+    dialogue = _open_dialogue(kv_connection.dialogues, message)
+
+    with pytest.raises(InvalidDialogueMessage):
+        dialogue.reply(
+            performative=KvStoreMessage.Performative.READ_RESPONSE,
+            target_message=message,
+            data={},
+        )

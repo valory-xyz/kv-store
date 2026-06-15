@@ -194,9 +194,9 @@ class KvStoreConnection(BaseSyncConnection):
 
         response: Optional[KvStoreMessage]
         try:
-            handler: Callable[[KvStoreMessage, KvStoreDialogue], KvStoreMessage] = (
-                getattr(self, kv_store_message.performative.value)
-            )
+            handler: Callable[
+                [KvStoreMessage, KvStoreDialogue], Optional[KvStoreMessage]
+            ] = getattr(self, kv_store_message.performative.value)
             response = handler(kv_store_message, dialogue)
         except Exception:  # pylint: disable=broad-exception-caught
             self.logger.exception(
@@ -285,12 +285,12 @@ class KvStoreConnection(BaseSyncConnection):
         """
         keys = message.keys
         self.logger.info(f"DB delete: {len(keys)} keys")
-        self.logger.debug(f"DB delete keys: {list(keys)}")
+        self.logger.debug(f"DB delete keys: {keys}")
 
         try:
             with db.atomic(lock_type="IMMEDIATE"):
                 if keys:
-                    Store.delete().where(Store.key.in_(list(keys))).execute()
+                    Store.delete().where(Store.key.in_(keys)).execute()
 
             return cast(
                 KvStoreMessage,
@@ -309,10 +309,12 @@ class KvStoreConnection(BaseSyncConnection):
         message: KvStoreMessage,
         dialogue: KvStoreDialogue,
     ) -> Optional[KvStoreMessage]:
-        """List key-value pairs whose key matches the given prefix.
+        """List key-value pairs whose key starts with the given prefix.
 
-        An empty ``key_prefix`` matches every row in the table; callers using
-        an empty prefix on a hot store are responsible for paginating in
+        Prefix matching is case-sensitive (BINARY collation), so a sweeper that
+        lists-then-deletes by prefix can't over-match a different-cased
+        namespace. An empty ``key_prefix`` matches every row; callers using an
+        empty prefix on a hot store are responsible for paginating in
         application code (the protocol does not chunk the response).
         """
         prefix = message.key_prefix
@@ -320,8 +322,23 @@ class KvStoreConnection(BaseSyncConnection):
 
         try:
             if prefix:
-                query = Store.select().where(Store.key.startswith(prefix))
+                # Case-sensitive prefix match. SQLite LIKE (what peewee's
+                # startswith emits) is case-insensitive for ASCII, which would
+                # over-match — dangerous for the delete-driving sweeper. TEXT
+                # uses BINARY collation, so a half-open range
+                # [prefix, prefix + max-code-point) is case-sensitive and
+                # index-friendly, and avoids LIKE wildcard semantics entirely.
+                upper_sentinel = prefix + chr(0x10FFFF)
+                query = Store.select().where(
+                    (Store.key >= prefix) & (Store.key < upper_sentinel)
+                )
             else:
+                # Empty prefix = full-table scan. Surface it so an operator can
+                # distinguish an intentional list-all from a sender that forgot
+                # to set key_prefix (the protobuf string default is "").
+                self.logger.warning(
+                    "DB list called with empty key_prefix; returning the full table."
+                )
                 query = Store.select()
             response_data = {entry.key: entry.value for entry in query}
             return cast(
