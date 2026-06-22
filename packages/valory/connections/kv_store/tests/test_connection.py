@@ -632,6 +632,15 @@ def test_concurrent_writes_do_not_deadlock(
         _build_delete_request(()),
         _build_list_request("preimage:"),
         _build_list_request(""),
+        # Non-default pagination values. Protobuf's scalar-default encoding
+        # means defaults (`limit=0`, `cursor=""`, `next_cursor=""`) are
+        # field-absent on the wire, so a serializer regression that
+        # *dropped* `limit` / `cursor` / `next_cursor` would produce
+        # identical bytes for the default cases above and silently pass.
+        # Pin the values explicitly here so encode-then-decode actually
+        # round-trips them, not just the structural shape.
+        _build_list_request("preimage:", limit=42, cursor="preimage:007"),
+        _build_list_response({"k": "v"}, next_cursor="preimage:9"),
         _build_list_response({"preimage:1": "v1", "preimage:2": "v2"}),
         _build_list_response({}),
     ],
@@ -640,6 +649,8 @@ def test_concurrent_writes_do_not_deadlock(
         "delete_empty",
         "list_req",
         "list_req_empty",
+        "list_req_paginated",
+        "list_resp_with_cursor",
         "list_resp",
         "list_resp_empty",
     ],
@@ -786,6 +797,37 @@ def test_list_request_last_page_returns_empty_next_cursor(
     assert response.next_cursor == ""
 
 
+def test_list_request_total_is_exact_multiple_of_limit(
+    kv_connection: KvStoreConnection,
+) -> None:
+    """A total that's an exact multiple of limit still terminates cleanly."""
+    # 9 rows at limit=3 = pages 3/3/3. The third page is FULL, but it must
+    # still return next_cursor="" because nothing follows it. This is
+    # precisely where a `>` vs `>=` regression on the `page_size + 1` probe
+    # would break: a buggy implementation would set has_more=True on the
+    # last page (one extra row not present), report a non-empty next_cursor,
+    # and the sweeper would loop forever asking for an empty fourth page.
+    _seed_preimages(9)
+
+    seen: Dict[str, str] = {}
+    cursor = ""
+    pages = 0
+    while True:
+        msg = _build_list_request("preimage:", limit=3, cursor=cursor)
+        dlg = _open_dialogue(kv_connection.dialogues, msg)
+        resp = kv_connection.list_request(msg, dlg)
+        assert resp is not None
+        seen.update(resp.data)
+        pages += 1
+        if not resp.next_cursor:
+            break
+        cursor = resp.next_cursor
+        assert pages < 5, "pagination did not terminate on exact-multiple boundary"
+
+    assert pages == 3
+    assert len(seen) == 9
+
+
 def test_list_request_full_walk_with_paging_visits_every_row(
     kv_connection: KvStoreConnection,
 ) -> None:
@@ -884,6 +926,12 @@ def test_list_request_empty_prefix_with_paging_walks_full_table(
         dlg = _open_dialogue(kv_connection.dialogues, msg)
         resp = kv_connection.list_request(msg, dlg)
         assert resp is not None
+        # Pages must not overlap. A same-value duplicate-emit on a page
+        # boundary would aggregate to the correct final set below and stay
+        # invisible without this assertion (mirrors the sibling
+        # test_list_request_full_walk_with_paging_visits_every_row).
+        overlap = set(resp.data) & set(seen)
+        assert not overlap, f"page overlap on keys {overlap}"
         seen.update(resp.data)
         if not resp.next_cursor:
             break

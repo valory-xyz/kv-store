@@ -381,7 +381,9 @@ class KvStoreConnection(BaseSyncConnection):
             if has_more:
                 rows = rows[:page_size]
             response_data = {row.key: row.value for row in rows}
-            next_cursor = rows[-1].key if has_more and rows else ""
+            # `has_more` is only True when len(rows) > page_size and page_size
+            # is always >= 1, so rows is guaranteed non-empty under has_more.
+            next_cursor = rows[-1].key if has_more else ""
             return cast(
                 KvStoreMessage,
                 dialogue.reply(
