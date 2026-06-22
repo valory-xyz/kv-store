@@ -7,14 +7,14 @@ license: Apache-2.0
 aea_version: '>=2.0.0, <3.0.0'
 fingerprint:
   __init__.py: bafybeiewlgvwc2won6ndek34hea2s3hkdhqdnhut5deeyyz6wfenwy5ywq
-  connection.py: bafybeieb6oqbqv7xfagskloaxs55l3ljemp5lz2t6yufpligbmzlfc7m6q
+  connection.py: bafybeigvefdbgpgmne3ytmeqzymo5qu6zoyhng5yhsongrx47rm5s3rlse
   readme.md: bafybeigyb5o5tymr2cl6mgdf2mcb74v66iuc4m4rwvxox5wtydsqxy7dmm
   tests/__init__.py: bafybeiara3iv2u3j66h3cssvi6g5gws2zekkdzogqlypnojruersdms5au
-  tests/test_connection.py: bafybeigdgkbxr2bu53bi5iua2irfboee5dhhxlz7acp5xfknunwid24zuq
+  tests/test_connection.py: bafybeifn5pb63agbotemk7335armv4vpyyl6qrjcj3jmvmdvd6j4ekvqv4
 fingerprint_ignore_patterns: []
 connections: []
 protocols:
-- valory/kv_store:0.1.0:bafybeiak5ezgopzmcjq75hz67aqhifzrvyjppdxrkl7cfjnsmojokzfrg4
+- valory/kv_store:0.1.0:bafybeibnvrkvkgwchncqplnfjrfrmo5dkvqljyp7imydvonpygi4gn43l4
 class_name: KvStoreConnection
 config:
   store_path: null
