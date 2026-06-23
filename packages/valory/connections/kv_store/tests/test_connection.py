@@ -28,6 +28,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from aea.mail.base import Envelope
+from aea.protocols.dialogue.base import InvalidDialogueMessage
 
 from packages.valory.connections.kv_store import connection as conn_mod
 from packages.valory.connections.kv_store.connection import (
@@ -39,6 +40,7 @@ from packages.valory.connections.kv_store.connection import (
     _GENERIC_ERROR_MESSAGE,
 )
 from packages.valory.protocols.kv_store.message import KvStoreMessage
+from packages.valory.protocols.kv_store.serialization import KvStoreSerializer
 
 SKILL_ADDRESS = "test_author/test_skill:0.1.0"
 CONNECTION_ADDRESS = str(PUBLIC_ID)
@@ -123,6 +125,41 @@ def _build_write_request(data: Dict[str, str]) -> KvStoreMessage:
         message_id=1,
         target=0,
         data=data,
+    )
+
+
+def _build_delete_request(keys: Tuple[str, ...]) -> KvStoreMessage:
+    return KvStoreMessage(
+        performative=KvStoreMessage.Performative.DELETE_REQUEST,  # type: ignore[arg-type]
+        dialogue_reference=(_next_ref(), ""),
+        message_id=1,
+        target=0,
+        keys=keys,
+    )
+
+
+def _build_list_request(
+    key_prefix: str, limit: int = 0, cursor: str = ""
+) -> KvStoreMessage:
+    return KvStoreMessage(
+        performative=KvStoreMessage.Performative.LIST_REQUEST,  # type: ignore[arg-type]
+        dialogue_reference=(_next_ref(), ""),
+        message_id=1,
+        target=0,
+        key_prefix=key_prefix,
+        limit=limit,
+        cursor=cursor,
+    )
+
+
+def _build_list_response(data: Dict[str, str], next_cursor: str = "") -> KvStoreMessage:
+    return KvStoreMessage(
+        performative=KvStoreMessage.Performative.LIST_RESPONSE,  # type: ignore[arg-type]
+        dialogue_reference=(_next_ref(), ""),
+        message_id=1,
+        target=0,
+        data=data,
+        next_cursor=next_cursor,
     )
 
 
@@ -244,6 +281,172 @@ def test_create_or_update_returns_error_when_db_raises(
     assert response is not None
     assert response.performative == KvStoreMessage.Performative.ERROR
     assert response.message == _GENERIC_ERROR_MESSAGE
+
+
+def test_delete_request_removes_matching_keys(
+    kv_connection: KvStoreConnection,
+) -> None:
+    """Delete drops matching rows and leaves the rest untouched."""
+    Store.create(key="a", value="1")
+    Store.create(key="b", value="2")
+    Store.create(key="c", value="3")
+
+    message = _build_delete_request(("a", "c"))
+    dialogue = _open_dialogue(kv_connection.dialogues, message)
+
+    response = kv_connection.delete_request(message, dialogue)
+
+    assert response is not None
+    assert response.performative == KvStoreMessage.Performative.SUCCESS
+    remaining = {row.key: row.value for row in Store.select()}
+    assert remaining == {"b": "2"}
+
+
+def test_delete_request_missing_keys_is_idempotent(
+    kv_connection: KvStoreConnection,
+) -> None:
+    """Deleting keys that do not exist is a no-op, not an error."""
+    Store.create(key="a", value="1")
+
+    message = _build_delete_request(("missing-1", "missing-2"))
+    dialogue = _open_dialogue(kv_connection.dialogues, message)
+
+    response = kv_connection.delete_request(message, dialogue)
+
+    assert response is not None
+    assert response.performative == KvStoreMessage.Performative.SUCCESS
+    assert {row.key for row in Store.select()} == {"a"}
+
+
+def test_delete_request_empty_keys_is_noop(
+    kv_connection: KvStoreConnection,
+) -> None:
+    """An empty key list returns SUCCESS without touching the table."""
+    Store.create(key="a", value="1")
+
+    message = _build_delete_request(())
+    dialogue = _open_dialogue(kv_connection.dialogues, message)
+
+    response = kv_connection.delete_request(message, dialogue)
+
+    assert response is not None
+    assert response.performative == KvStoreMessage.Performative.SUCCESS
+    assert {row.key for row in Store.select()} == {"a"}
+
+
+def test_delete_request_returns_error_when_db_raises(
+    kv_connection: KvStoreConnection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A DB exception during delete is converted to an ERROR reply."""
+
+    def boom(*_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError("delete failure")
+
+    monkeypatch.setattr(Store, "delete", boom)
+
+    message = _build_delete_request(("a",))
+    dialogue = _open_dialogue(kv_connection.dialogues, message)
+
+    response = kv_connection.delete_request(message, dialogue)
+
+    assert response is not None
+    assert response.performative == KvStoreMessage.Performative.ERROR
+    assert response.message == _GENERIC_ERROR_MESSAGE
+
+
+def test_list_request_filters_by_prefix(
+    kv_connection: KvStoreConnection,
+) -> None:
+    """List returns only rows whose key starts with the given prefix."""
+    Store.create(key="preimage:1", value="a")
+    Store.create(key="preimage:2", value="b")
+    Store.create(key="other:1", value="c")
+
+    message = _build_list_request("preimage:")
+    dialogue = _open_dialogue(kv_connection.dialogues, message)
+
+    response = kv_connection.list_request(message, dialogue)
+
+    assert response is not None
+    assert response.performative == KvStoreMessage.Performative.LIST_RESPONSE
+    assert response.data == {"preimage:1": "a", "preimage:2": "b"}
+
+
+def test_list_request_no_matches_returns_empty(
+    kv_connection: KvStoreConnection,
+) -> None:
+    """A prefix that matches no rows yields an empty response, not an error."""
+    Store.create(key="other:1", value="a")
+
+    message = _build_list_request("preimage:")
+    dialogue = _open_dialogue(kv_connection.dialogues, message)
+
+    response = kv_connection.list_request(message, dialogue)
+
+    assert response is not None
+    assert response.performative == KvStoreMessage.Performative.LIST_RESPONSE
+    assert response.data == {}
+
+
+def test_list_request_empty_prefix_returns_all_rows(
+    kv_connection: KvStoreConnection,
+) -> None:
+    """An empty prefix matches every row in the table."""
+    # Sweeper use-case: caller wants to enumerate every entry for retention
+    # filtering when they don't know all the prefixes in use.
+    Store.create(key="preimage:1", value="a")
+    Store.create(key="metric:cpu", value="b")
+    Store.create(key="lock", value="c")
+
+    message = _build_list_request("")
+    dialogue = _open_dialogue(kv_connection.dialogues, message)
+
+    response = kv_connection.list_request(message, dialogue)
+
+    assert response is not None
+    assert response.performative == KvStoreMessage.Performative.LIST_RESPONSE
+    assert response.data == {"preimage:1": "a", "metric:cpu": "b", "lock": "c"}
+
+
+@pytest.mark.parametrize("prefix", ["preimage:", ""])
+def test_list_request_returns_error_when_db_raises(
+    kv_connection: KvStoreConnection, monkeypatch: pytest.MonkeyPatch, prefix: str
+) -> None:
+    """A DB exception during list converts to an ERROR reply (both branches)."""
+
+    def boom(*_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError("list failure")
+
+    monkeypatch.setattr(Store, "select", boom)
+
+    message = _build_list_request(prefix)
+    dialogue = _open_dialogue(kv_connection.dialogues, message)
+
+    response = kv_connection.list_request(message, dialogue)
+
+    assert response is not None
+    assert response.performative == KvStoreMessage.Performative.ERROR
+    assert response.message == _GENERIC_ERROR_MESSAGE
+
+
+def test_delete_then_list_roundtrip(
+    kv_connection: KvStoreConnection,
+) -> None:
+    """A delete is reflected on the very next list call (sweeper happy path)."""
+    Store.create(key="preimage:1", value="a")
+    Store.create(key="preimage:2", value="b")
+
+    delete_msg = _build_delete_request(("preimage:1",))
+    delete_dlg = _open_dialogue(kv_connection.dialogues, delete_msg)
+    delete_resp = kv_connection.delete_request(delete_msg, delete_dlg)
+    assert delete_resp is not None
+    assert delete_resp.performative == KvStoreMessage.Performative.SUCCESS
+
+    list_msg = _build_list_request("preimage:")
+    list_dlg = _open_dialogue(kv_connection.dialogues, list_msg)
+    list_resp = kv_connection.list_request(list_msg, list_dlg)
+    assert list_resp is not None
+    assert list_resp.data == {"preimage:2": "b"}
 
 
 def test_read_request_returns_error_when_db_raises(
@@ -417,3 +620,357 @@ def test_concurrent_writes_do_not_deadlock(
 
     stored = {row.key: row.value for row in Store.select()}
     assert stored == expected
+
+
+# --- serialization round-trips for the new performatives --------------------
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        _build_delete_request(("a", "b")),
+        _build_delete_request(()),
+        _build_list_request("preimage:"),
+        _build_list_request(""),
+        # Non-default pagination values. Protobuf's scalar-default encoding
+        # means defaults (`limit=0`, `cursor=""`, `next_cursor=""`) are
+        # field-absent on the wire, so a serializer regression that
+        # *dropped* `limit` / `cursor` / `next_cursor` would produce
+        # identical bytes for the default cases above and silently pass.
+        # Pin the values explicitly here so encode-then-decode actually
+        # round-trips them, not just the structural shape.
+        _build_list_request("preimage:", limit=42, cursor="preimage:007"),
+        _build_list_response({"k": "v"}, next_cursor="preimage:9"),
+        _build_list_response({"preimage:1": "v1", "preimage:2": "v2"}),
+        _build_list_response({}),
+    ],
+    ids=[
+        "delete",
+        "delete_empty",
+        "list_req",
+        "list_req_empty",
+        "list_req_paginated",
+        "list_resp_with_cursor",
+        "list_resp",
+        "list_resp_empty",
+    ],
+)
+def test_serialization_round_trip(message: KvStoreMessage) -> None:
+    """Encode then decode reproduces each new performative's message."""
+    decoded = KvStoreSerializer.decode(KvStoreSerializer.encode(message))
+    assert decoded == message
+
+
+# --- on_send dispatch for the new request performatives ----------------------
+
+
+def test_on_send_dispatches_delete_request(kv_connection: KvStoreConnection) -> None:
+    """DELETE_REQUEST dispatches through on_send to its handler and replies."""
+    Store.create(key="preimage:1", value="v1")
+    request = _build_delete_request(("preimage:1",))
+    request.sender = SKILL_ADDRESS
+    request.to = CONNECTION_ADDRESS
+    envelope = Envelope(to=CONNECTION_ADDRESS, sender=SKILL_ADDRESS, message=request)
+
+    kv_connection.on_send(envelope)
+
+    assert kv_connection.put_envelope.call_count == 1
+    response = kv_connection.put_envelope.call_args[0][0].message
+    assert response.performative == KvStoreMessage.Performative.SUCCESS
+
+
+def test_on_send_dispatches_list_request(kv_connection: KvStoreConnection) -> None:
+    """LIST_REQUEST round-trips through on_send -> handler -> put_envelope."""
+    Store.create(key="preimage:1", value="v1")
+    request = _build_list_request("preimage:")
+    request.sender = SKILL_ADDRESS
+    request.to = CONNECTION_ADDRESS
+    envelope = Envelope(to=CONNECTION_ADDRESS, sender=SKILL_ADDRESS, message=request)
+
+    kv_connection.on_send(envelope)
+
+    assert kv_connection.put_envelope.call_count == 1
+    response = kv_connection.put_envelope.call_args[0][0].message
+    assert response.performative == KvStoreMessage.Performative.LIST_RESPONSE
+    assert response.data == {"preimage:1": "v1"}
+
+
+# --- delete empty-keys is a true no-op (no Store.delete issued) ---------------
+
+
+def test_delete_request_empty_keys_does_not_call_delete(
+    kv_connection: KvStoreConnection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An empty key list skips the DELETE entirely (the `if keys:` guard)."""
+    delete_spy = MagicMock(
+        side_effect=AssertionError("Store.delete must not be called for empty keys")
+    )
+    monkeypatch.setattr(Store, "delete", delete_spy)
+
+    message = _build_delete_request(())
+    dialogue = _open_dialogue(kv_connection.dialogues, message)
+    response = kv_connection.delete_request(message, dialogue)
+
+    assert response is not None
+    assert response.performative == KvStoreMessage.Performative.SUCCESS
+    delete_spy.assert_not_called()
+
+
+# --- case-sensitive prefix matching ------------------------------------------
+
+
+def test_list_request_prefix_is_case_sensitive(
+    kv_connection: KvStoreConnection,
+) -> None:
+    """Prefix matching is case-sensitive, so a sweeper can't over-match."""
+    Store.create(key="preimage:1", value="v1")
+    Store.create(key="PREIMAGE:2", value="v2")
+
+    message = _build_list_request("preimage:")
+    dialogue = _open_dialogue(kv_connection.dialogues, message)
+    response = kv_connection.list_request(message, dialogue)
+
+    assert response is not None
+    assert response.data == {"preimage:1": "v1"}
+
+
+# --- LIST_REQUEST pagination ------------------------------------------------
+
+
+def _seed_preimages(count: int) -> None:
+    """Insert ``count`` preimage:NNN rows with zero-padded keys for stable ordering."""
+    for i in range(count):
+        Store.create(key=f"preimage:{i:03d}", value=f"v{i}")
+
+
+def test_list_request_returns_first_page_with_next_cursor(
+    kv_connection: KvStoreConnection,
+) -> None:
+    """First page returns ``limit`` rows and a non-empty cursor pointing at the last key."""
+    _seed_preimages(10)
+    message = _build_list_request("preimage:", limit=3)
+    dialogue = _open_dialogue(kv_connection.dialogues, message)
+
+    response = kv_connection.list_request(message, dialogue)
+
+    assert response is not None
+    assert response.performative == KvStoreMessage.Performative.LIST_RESPONSE
+    assert response.data == {
+        "preimage:000": "v0",
+        "preimage:001": "v1",
+        "preimage:002": "v2",
+    }
+    assert response.next_cursor == "preimage:002"
+
+
+def test_list_request_subsequent_pages_pick_up_after_cursor(
+    kv_connection: KvStoreConnection,
+) -> None:
+    """Passing the prior page's ``next_cursor`` back returns the next slice."""
+    _seed_preimages(7)
+    message = _build_list_request("preimage:", limit=3, cursor="preimage:002")
+    dialogue = _open_dialogue(kv_connection.dialogues, message)
+
+    response = kv_connection.list_request(message, dialogue)
+
+    assert response is not None
+    assert response.data == {
+        "preimage:003": "v3",
+        "preimage:004": "v4",
+        "preimage:005": "v5",
+    }
+    assert response.next_cursor == "preimage:005"
+
+
+def test_list_request_last_page_returns_empty_next_cursor(
+    kv_connection: KvStoreConnection,
+) -> None:
+    """Final page (no more rows after it) signals 'done' with an empty cursor."""
+    _seed_preimages(5)
+    message = _build_list_request("preimage:", limit=3, cursor="preimage:002")
+    dialogue = _open_dialogue(kv_connection.dialogues, message)
+
+    response = kv_connection.list_request(message, dialogue)
+
+    assert response is not None
+    assert response.data == {"preimage:003": "v3", "preimage:004": "v4"}
+    assert response.next_cursor == ""
+
+
+def test_list_request_total_is_exact_multiple_of_limit(
+    kv_connection: KvStoreConnection,
+) -> None:
+    """A total that's an exact multiple of limit still terminates cleanly."""
+    # 9 rows at limit=3 = pages 3/3/3. The third page is FULL, but it must
+    # still return next_cursor="" because nothing follows it. This is
+    # precisely where a `>` vs `>=` regression on the `page_size + 1` probe
+    # would break: a buggy implementation would set has_more=True on the
+    # last page (one extra row not present), report a non-empty next_cursor,
+    # and the sweeper would loop forever asking for an empty fourth page.
+    _seed_preimages(9)
+
+    seen: Dict[str, str] = {}
+    cursor = ""
+    pages = 0
+    while True:
+        msg = _build_list_request("preimage:", limit=3, cursor=cursor)
+        dlg = _open_dialogue(kv_connection.dialogues, msg)
+        resp = kv_connection.list_request(msg, dlg)
+        assert resp is not None
+        seen.update(resp.data)
+        pages += 1
+        if not resp.next_cursor:
+            break
+        cursor = resp.next_cursor
+        assert pages < 5, "pagination did not terminate on exact-multiple boundary"
+
+    assert pages == 3
+    assert len(seen) == 9
+
+
+def test_list_request_full_walk_with_paging_visits_every_row(
+    kv_connection: KvStoreConnection,
+) -> None:
+    """Repeated pages with cursor feedback eventually return the whole namespace."""
+    # This is the actual sweeper-style call pattern. If pagination is wired
+    # wrong (off-by-one on the cursor, wrong ORDER BY, etc.) we either miss
+    # rows or double-emit them — both visible from the final aggregate.
+    _seed_preimages(10)
+
+    seen: Dict[str, str] = {}
+    cursor = ""
+    pages = 0
+    while True:
+        msg = _build_list_request("preimage:", limit=3, cursor=cursor)
+        dlg = _open_dialogue(kv_connection.dialogues, msg)
+        resp = kv_connection.list_request(msg, dlg)
+        assert resp is not None
+        # Pages must not overlap; double-emit would surface here.
+        overlap = set(resp.data) & set(seen)
+        assert not overlap, f"page overlap on keys {overlap}"
+        seen.update(resp.data)
+        pages += 1
+        if not resp.next_cursor:
+            break
+        cursor = resp.next_cursor
+        assert pages < 20, "pagination did not terminate"
+
+    assert seen == {f"preimage:{i:03d}": f"v{i}" for i in range(10)}
+
+
+def test_list_request_default_page_size_when_limit_is_zero(
+    kv_connection: KvStoreConnection,
+) -> None:
+    """limit=0 (protobuf scalar default) means 'use the server default'."""
+    # Server default is 100; seed comfortably above to verify the cap kicks in
+    # and we don't just get every row back by accident.
+    _seed_preimages(150)
+    message = _build_list_request("preimage:", limit=0)
+    dialogue = _open_dialogue(kv_connection.dialogues, message)
+
+    response = kv_connection.list_request(message, dialogue)
+
+    assert response is not None
+    assert len(response.data) == conn_mod._LIST_DEFAULT_PAGE_SIZE
+    assert response.next_cursor != ""
+
+
+def test_list_request_clamps_oversized_limit_to_server_max(
+    kv_connection: KvStoreConnection,
+) -> None:
+    """A client asking for more than the server max gets the server max."""
+    _seed_preimages(conn_mod._LIST_MAX_PAGE_SIZE + 50)
+    message = _build_list_request("preimage:", limit=conn_mod._LIST_MAX_PAGE_SIZE * 10)
+    dialogue = _open_dialogue(kv_connection.dialogues, message)
+
+    response = kv_connection.list_request(message, dialogue)
+
+    assert response is not None
+    assert len(response.data) == conn_mod._LIST_MAX_PAGE_SIZE
+    assert response.next_cursor != ""
+
+
+def test_list_request_cursor_at_deleted_key_skips_to_next(
+    kv_connection: KvStoreConnection,
+) -> None:
+    """A cursor that points at a now-deleted key resumes from the next-greater key."""
+    # Sweepers typically list-then-delete; a follow-up sweep may carry a cursor
+    # whose key no longer exists. The strict ``>`` semantics must still place
+    # the new page after the missing key, not skip a real row.
+    _seed_preimages(5)
+    Store.delete().where(Store.key == "preimage:002").execute()
+
+    message = _build_list_request("preimage:", limit=10, cursor="preimage:002")
+    dialogue = _open_dialogue(kv_connection.dialogues, message)
+    response = kv_connection.list_request(message, dialogue)
+
+    assert response is not None
+    assert response.data == {"preimage:003": "v3", "preimage:004": "v4"}
+    assert response.next_cursor == ""
+
+
+def test_list_request_empty_prefix_with_paging_walks_full_table(
+    kv_connection: KvStoreConnection,
+) -> None:
+    """Empty prefix + paging walks the whole table without unbounded responses."""
+    # Mixed-namespace store; the empty-prefix sweep must page through every
+    # row regardless of which namespace they belong to.
+    Store.create(key="metric:1", value="m1")
+    Store.create(key="preimage:1", value="p1")
+    Store.create(key="zlock", value="zl")
+
+    seen: Dict[str, str] = {}
+    cursor = ""
+    for _ in range(5):
+        msg = _build_list_request("", limit=2, cursor=cursor)
+        dlg = _open_dialogue(kv_connection.dialogues, msg)
+        resp = kv_connection.list_request(msg, dlg)
+        assert resp is not None
+        # Pages must not overlap. A same-value duplicate-emit on a page
+        # boundary would aggregate to the correct final set below and stay
+        # invisible without this assertion (mirrors the sibling
+        # test_list_request_full_walk_with_paging_visits_every_row).
+        overlap = set(resp.data) & set(seen)
+        assert not overlap, f"page overlap on keys {overlap}"
+        seen.update(resp.data)
+        if not resp.next_cursor:
+            break
+        cursor = resp.next_cursor
+
+    assert seen == {"metric:1": "m1", "preimage:1": "p1", "zlock": "zl"}
+
+
+def test_list_request_negative_limit_is_rejected(
+    kv_connection: KvStoreConnection,
+) -> None:
+    """Constructing a LIST_REQUEST with a negative limit fails consistency."""
+    # protobuf wire format is uint32, so a real on-the-wire negative is
+    # impossible; this guards the in-process construction path.
+    bad = KvStoreMessage(
+        performative=KvStoreMessage.Performative.LIST_REQUEST,  # type: ignore[arg-type]
+        dialogue_reference=(_next_ref(), ""),
+        message_id=1,
+        target=0,
+        key_prefix="preimage:",
+        limit=-1,
+        cursor="",
+    )
+    assert bad._is_consistent() is False
+
+
+# --- dialogue rejects an invalid reply (VALID_REPLIES enforcement) -----------
+
+
+def test_dialogue_rejects_invalid_reply_to_delete_request(
+    kv_connection: KvStoreConnection,
+) -> None:
+    """A READ_RESPONSE reply to a DELETE_REQUEST is rejected by the dialogue."""
+    message = _build_delete_request(("a",))
+    dialogue = _open_dialogue(kv_connection.dialogues, message)
+
+    with pytest.raises(InvalidDialogueMessage):
+        dialogue.reply(
+            performative=KvStoreMessage.Performative.READ_RESPONSE,
+            target_message=message,
+            data={},
+        )

@@ -41,11 +41,14 @@ class KvStoreDialogue(Dialogue):
         {
             KvStoreMessage.Performative.READ_REQUEST,
             KvStoreMessage.Performative.CREATE_OR_UPDATE_REQUEST,
+            KvStoreMessage.Performative.DELETE_REQUEST,
+            KvStoreMessage.Performative.LIST_REQUEST,
         }
     )
     TERMINAL_PERFORMATIVES: FrozenSet[Message.Performative] = frozenset(
         {
             KvStoreMessage.Performative.READ_RESPONSE,
+            KvStoreMessage.Performative.LIST_RESPONSE,
             KvStoreMessage.Performative.SUCCESS,
             KvStoreMessage.Performative.ERROR,
         }
@@ -54,7 +57,17 @@ class KvStoreDialogue(Dialogue):
         KvStoreMessage.Performative.CREATE_OR_UPDATE_REQUEST: frozenset(
             {KvStoreMessage.Performative.SUCCESS, KvStoreMessage.Performative.ERROR}
         ),
+        KvStoreMessage.Performative.DELETE_REQUEST: frozenset(
+            {KvStoreMessage.Performative.SUCCESS, KvStoreMessage.Performative.ERROR}
+        ),
         KvStoreMessage.Performative.ERROR: frozenset(),
+        KvStoreMessage.Performative.LIST_REQUEST: frozenset(
+            {
+                KvStoreMessage.Performative.LIST_RESPONSE,
+                KvStoreMessage.Performative.ERROR,
+            }
+        ),
+        KvStoreMessage.Performative.LIST_RESPONSE: frozenset(),
         KvStoreMessage.Performative.READ_REQUEST: frozenset(
             {
                 KvStoreMessage.Performative.READ_RESPONSE,
