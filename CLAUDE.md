@@ -9,22 +9,20 @@ does not behave as documented, a check that fails for reasons unrelated to your 
 local failure CI never sees — add it below before you finish. The next agent has no
 memory of your run.
 
-## Traps
+Prefer durable facts about how this repo is built over descriptions of how a tool
+currently behaves — the second kind is stale by the next release, and a confidently wrong
+file is worse than a thin one. Verify before you write.
 
-- **Never run a bare `tomte tox`, and never `tomte tox -e check-generate-all-protocols`.**
-  That env is in tomte's default envlist, so running `tomte tox` with no `-e` triggers it.
-  It rewrites the protocol package in place and does not roll back — see *do not
-  regenerate it* below for what it destroys and how to recover.
-- **Always `tomte tox`, never bare `tox`.** This repo's `tox.ini` defines no `[tox]` or
-  `[testenv]` sections; the envs are rendered by tomte. Bare `tox -e <env>` finds nothing.
-  The `Makefile` uses `tomte tox` throughout — keep it that way.
-- **`liccheck` fails on packages whose PyPI metadata omits a license**, even when the
-  project is permissively licensed. `cffi` (MIT-0), `peewee`, `anchorpy`, `based58`,
-  `jsonalias` and `httpx` each need an entry under `[Authorized Packages]` in `tox.ini`.
-- **A failed `pip install` in the `windows-2025` CI steps reports green.** Those steps run
-  under pwsh, which has no errexit, so the failure surfaces later and elsewhere as a
-  confusing "tomte not found" in the test step. Linux and macOS steps are safe — Actions
-  runs bash with `-eo pipefail`.
+## Rules
+
+- **Do not regenerate the protocol.** The checked-in code is authoritative; see below.
+  Avoid `check-generate-all-protocols` — it rewrites the package tree in place.
+- **Always `tomte tox`, never bare `tox`.** This repo's `tox.ini` defines no testenvs by
+  design; they are rendered by tomte. The `Makefile` uses `tomte tox` throughout.
+- **`liccheck` runs a PARANOID strategy** that rejects transitive dependencies whose PyPI
+  metadata omits a license, even when the project is permissively licensed. That is what
+  the `[Authorized Packages]` entries in `tox.ini` are for; expect to add one after a
+  dependency bump.
 
 ## Environment
 
@@ -59,14 +57,12 @@ fingerprints and the hashes in `packages/packages.json`. Skip it and CI fails
 `check-hash` and `check-packages`. This includes edits to package READMEs — they are
 fingerprinted too. `autonomy packages lock --check` verifies without rewriting.
 
-Verifying a fingerprint by hand needs `wrap=False`; `IPFSHashOnly.get` defaults to
-`wrap=True` and will report every entry as a mismatch. Prefer `lock --check`.
+Verify fingerprints with `lock --check` rather than hashing by hand — hand-computed IPFS
+hashes will not match unless you reproduce the exact options the tooling uses.
 
-`.gitignore` ignores `packages/valory/{contracts,protocols,skills,connections}/*`
-wholesale and re-adds individual packages with `!`. Only the `kv_store` connection and
-protocol exist here; the other `!` entries are leftovers from the source repos. A new
-connection, protocol, skill or contract needs its own `!` entry or it silently will not
-be committed. Agents and services are not covered by those globs.
+`.gitignore` ignores the `packages/valory/*` package-type directories wholesale and
+re-adds individual packages with `!`. A new connection, protocol, skill or contract needs
+its own `!` entry or it silently will not be committed.
 
 ## The kv_store protocol: do not regenerate it
 
@@ -84,22 +80,12 @@ different thing — it takes an explicit spec-file path and never looks at the R
 
 tomte ships a `check-generate-all-protocols` env for exactly this consistency check. It
 is deliberately **not** wired into the `Makefile` or CI here, and must stay that way: the
-divergences above are intentional, so the check would fail permanently by design. The
-hand-maintained code is the wire-format source of truth — the spec cannot express
-`uint32` and cannot preserve field numbers.
+divergences above are intentional, so the check fails permanently by design. Running it is
+also destructive — it rewrites the package tree before failing, and does not roll back.
 
-Running that env is also destructive. `autonomy generate-all-protocols --check-clean`
-writes the regenerated files into the package tree *before* checking cleanliness and
-exiting 1, and does not roll back: it overwrites the six generated files and
-`protocol.yaml`, and leaves an untracked `tests/` directory behind. Restore with
-`git checkout origin/main -- <files>`, then re-run `autonomy packages lock`.
-
-The spec block's **final** `...` is load-bearing. `SPECIFICATION_REGEX` in
-`aea/helpers/protocols.py` is greedy but cannot run past the last `...` in the file, so
-dropping it silently truncates the spec to its first document — losing `initiation` and
-`end_states` without raising — and generation then dies far away with `list index out of
-range`. The separator between the two documents is a bare `---`; only the closing
-terminator matters.
+The spec block's **final** `...` terminator is load-bearing. Without it the spec is
+silently truncated to its first document, losing the dialogue configuration with no error
+raised, and generation fails later for an unrelated-looking reason.
 
 ## tomte
 
