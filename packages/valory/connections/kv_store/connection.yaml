@@ -14,7 +14,7 @@ fingerprint:
 fingerprint_ignore_patterns: []
 connections: []
 protocols:
-- valory/kv_store:0.1.0:bafybeidlfrgv5rc7m7kj3j6u6umogmpy5bgcdzqtnsy3v75wn3likvyt6m
+- valory/kv_store:0.1.0:bafybeiay3lijdegpj2zlb5y5phihr6xjpitdze436krlg3qfcqaa3e7fuq
 class_name: KvStoreConnection
 config:
   store_path: null

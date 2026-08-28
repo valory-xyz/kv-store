@@ -39,7 +39,7 @@ Repository = "https://github.com/valory-xyz/kv-store"
 [dependency-groups]
 dev = [
     "setuptools>=78.1.1,<82",
-    "tomte[cli, tests] @ git+https://github.com/valory-xyz/tomte.git@v0.7.0",
+    "tomte[cli, tests] @ git+https://github.com/valory-xyz/tomte.git@v0.7.2",
 ]
 
 [tool.uv]
@@ -51,7 +51,7 @@ prerelease = "allow"
 # beyond OA/open-aea, which tomte auto-derives from `[project].dependencies`.
 upstream_pins = []
 pytest_targets = ["packages/valory/connections/kv_store/tests"]
-tomte_dep_pin = " @ git+https://github.com/valory-xyz/tomte.git@v0.7.0"
+tomte_dep_pin = " @ git+https://github.com/valory-xyz/tomte.git@v0.7.2"
 
 [tool.uv.build-backend]
 module-name = ["packages"]

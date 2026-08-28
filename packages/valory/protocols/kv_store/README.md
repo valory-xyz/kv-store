@@ -13,7 +13,7 @@ author: valory
 version: 0.1.0
 description: A protocol for simple key-value storage.
 license: Apache-2.0
-aea_version: '>=1.0.0, <2.0.0'
+aea_version: '>=2.0.0, <3.0.0'
 protocol_specification_id: valory/kv_store:0.1.0
 speech_acts:
   read_request:
@@ -55,6 +55,7 @@ termination: [read_response, list_response, success, error]
 roles: {skill, connection}
 end_states: [successful]
 keep_terminal_state_dialogues: false
+...
 ```
 
 ## Links
